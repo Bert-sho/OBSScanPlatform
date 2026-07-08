@@ -51,9 +51,16 @@ def create_app(config_path: Path | None = None, results_dir: Path | None = None)
     def runs() -> list[dict]:
         if not configured_results_dir.exists():
             return []
+        resolved_results_dir = configured_results_dir.resolve()
         manifests = []
         for run_dir in sorted(configured_results_dir.iterdir()):
-            if run_dir.is_dir() and (run_dir / "manifest.json").exists():
+            if not run_dir.is_dir() or run_dir.is_symlink():
+                continue
+            try:
+                run_dir.resolve().relative_to(resolved_results_dir)
+            except ValueError:
+                continue
+            if (run_dir / "manifest.json").exists():
                 manifests.append(_read_manifest(run_dir))
         return manifests
 

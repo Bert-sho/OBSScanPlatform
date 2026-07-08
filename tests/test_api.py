@@ -46,6 +46,25 @@ def test_runs_list_reads_manifest(tmp_path: Path):
     assert response.json()[0]["run_id"] == "run-1"
 
 
+def test_runs_list_ignores_symlinked_external_run(tmp_path: Path):
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+    outside_dir = tmp_path / "outside-run"
+    outside_dir.mkdir()
+    (outside_dir / "manifest.json").write_text(
+        json.dumps({"run_id": "outside-run", "status": "success", "applications": []}),
+        encoding="utf-8",
+    )
+    (results_dir / "linked-run").symlink_to(outside_dir, target_is_directory=True)
+    client = TestClient(api.create_app(results_dir=results_dir))
+
+    response = client.get("/runs")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    assert "outside-run" not in response.text
+
+
 def test_post_runs_requires_config_path(tmp_path: Path):
     client = TestClient(api.create_app(results_dir=tmp_path))
     response = client.post("/runs")
@@ -177,6 +196,38 @@ def test_bucket_csv_rejects_path_traversal(tmp_path: Path):
 
     assert response.status_code in {400, 404}
     assert "external csv" not in response.text
+
+
+def test_bucket_csv_rejects_appid_path_traversal(tmp_path: Path):
+    results_dir = tmp_path / "results"
+    (results_dir / "run-1").mkdir(parents=True)
+    (results_dir / "bucket-1.csv").write_text("external app csv", encoding="utf-8")
+    client = TestClient(api.create_app(results_dir=results_dir))
+
+    response = client.get("/runs/run-1/apps/%2E%2E/buckets/bucket-1/csv")
+
+    assert response.status_code in {400, 404}
+    assert "external app csv" not in response.text
+
+
+def test_bucket_csv_rejects_bucket_name_path_traversal(tmp_path: Path):
+    results_dir = tmp_path / "results"
+    app_dir = results_dir / "run-1" / "app-1"
+    app_dir.mkdir(parents=True)
+    (app_dir / "...csv").write_text("dotdot bucket csv", encoding="utf-8")
+    (results_dir / "run-1" / "external.csv").write_text(
+        "external bucket csv",
+        encoding="utf-8",
+    )
+    client = TestClient(api.create_app(results_dir=results_dir))
+
+    dotdot_response = client.get("/runs/run-1/apps/app-1/buckets/%2E%2E/csv")
+    slash_response = client.get("/runs/run-1/apps/app-1/buckets/%2E%2E%2Fexternal/csv")
+
+    assert dotdot_response.status_code in {400, 404}
+    assert "dotdot bucket csv" not in dotdot_response.text
+    assert slash_response.status_code in {400, 404}
+    assert "external bucket csv" not in slash_response.text
 
 
 def test_post_runs_accepts_scan_and_resets_active_scan(tmp_path: Path, monkeypatch):
