@@ -1,0 +1,33 @@
+# Current Task
+
+- Current task title: Task 9 worker - End-to-End Validation With Mocked OBS
+- Current branch: `codex/obs-scan-platform`
+- Task status: `completed`
+- User goal: Add a realistic end-to-end scan validation using mocked OBS API, update first-version README usage docs, avoid real network calls, and commit the work.
+- Completed work:
+  - Added `tests/test_scan_end_to_end.py`.
+  - The new test runs `Scanner.run(run_id="run-1")` through a mocked OBS client.
+  - Verified listbuckets returns an owned bucket and a shared bucket, and the shared bucket is skipped.
+  - Verified endpoint, root filelist, root file metadata, and prefix objectkeys API paths are called.
+  - Verified root file size comes from metadata and prefix objectkeys contribute to final aggregation.
+  - Verified final CSV path is `results/run-1/<appid>/<bucket>.csv`, contains directory summaries only, and does not include object file names.
+  - Verified manifest status is `success` and bucket `csv_path` points to an existing CSV.
+  - Verified successful bucket scan removes its temp directory when `keep_temp_files=false`.
+  - Updated `README.md` with development install, config copy, CLI scan, per-app scan, API startup, result locations, and single-worker API limitation.
+- Remaining work: None for Task 9.
+- Key files changed:
+  - `tests/test_scan_end_to_end.py`
+  - `README.md`
+  - `docs/current-task.md`
+  - `docs/handoff.md`
+- Validation commands run:
+  - `pytest tests/test_scan_end_to_end.py -v`
+  - `pytest -q`
+- Validation result:
+  - `pytest tests/test_scan_end_to_end.py -v`: 1 passed.
+  - `pytest -q`: 65 passed, 1 warning.
+  - Warning: Starlette deprecation warning from `fastapi.testclient` importing `httpx`; not introduced by this task.
+- Known risks:
+  - TDD red phase did not produce a failing test because the existing scanner implementation already satisfied the new end-to-end expectations on first run.
+  - The mocked OBS path validates scanner integration and CSV aggregation without network, but does not exercise real HTTP transport, retry timing, or real OBS response drift.
+- Next recommended action: Review the committed diff, then continue with the next task or run the scanner against a controlled non-production OBS fixture when real credentials are available.
