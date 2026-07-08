@@ -1,0 +1,282 @@
+OBS扫描接口
+（1）列出当前应用的所有OBS桶
+GET
+http:(self.ENDPOINT)/rest/s3/listbuckets
+Headers:
+Content-Type="application/json"
+csb-token="cbb156df-d7c0-43e7-aad4-175ef5e921df” 当前应用的apptoken
+Params:
+appid=com.camera.pergen 当前应用的appid
+Response：
+{
+  "success": true,
+  "msg": "",
+  "detail": null,
+  "includingDetail": false,
+  "errorCode": null,
+  "buckets": [
+    {
+      "colocationld": null,
+      "colocationAccount": "default",
+      "id": "20583467-6766-46b9-be29-0b0eba7bf298",
+      "name": "bucket-1191",
+      "type": "STANDARD",
+      "region": "cn-east-3",
+      "vendor": "HEC",
+      "createTime": 1765502875000,
+      "endpoint": "obs.cn-east-3.myhuaweicloud.com",
+      "domain": "bucket-1191.obs.myhuaweiclocom",
+      "size": "200906.03 GB",
+      "objNum": "723794",
+      "networkType": "yellow",
+      "auth": "owner",
+      "shareFrom": null,
+      "shareFromUserld": null,
+      "ifAllowGreenVisit": true,
+      "advancedPermission": false,
+      "fileShareBucket": null,
+      "encryptBucket": null,
+      "bucketType": "OBJECT",
+      "creator": "h00484736",
+      "esSearchPermission": null,
+      "multipleVersionsStatus": null,
+      "directColdAccess": null,
+      "glacierSize": "0 Byte",
+      "glacierObjectNumber": "0"
+    }
+  ],
+  "limitNum": 0
+}
+（2）获取当前桶的 endpoint
+GET
+http:(self.ENDPOINT)/rest/s3/bucket/endpoint
+Headers:
+Content-Type="application/json"
+Params:
+bucketid=bucket-1191 listbuckets信息中的name
+token=cbb156df-d7c0-43e7-aad4-175ef5e921df 当前应用的apptoken
+vendor=HEC listbuckets 信息中的vendor
+region=cn-east-3 listbuckets 信息中的region
+bucketUid=20583467-6766-46b9-be29-0b0e6a7bf298  listbuckets信息中的id，该桶在当前应用的id
+Response:
+{
+  "success": true,
+  "msg": "",
+  "detail": null,
+  "includingPetail": false,
+  "errorCode": null,
+  "result": "http://cn-east-3y.csbobs.roma.huawei.com:8080/csb-file-server",
+  "limitNum": 0,
+  "total": 0,
+  "bucket": {
+    "colocationld": null,
+    "colocationAccount": "default",
+    "id": "20583467-6766-46b9-be29-0bOeba7bf298",
+    "name": "bucket-1191",
+    "type": "STANDARD",
+    "region": "cn-east-3",
+    "vendor": "HEC",
+    "CreateTime": 1765502875000,
+    "endpoint": "obs.cn- east-3.myhuaweicloud.com",
+    "domain": "bucket-1191.obs.myhuaweicloud.com",
+    "size": "200906.03 GB",
+    "objNum": "723794",
+    "networkType": "yellow",
+    "auth": "owner",
+    "shareFrom": null,
+    "shareFromUserld": null,
+    "ifAllowGreenVisit": true,
+    "advancedPermission": false,
+    "fileShareBucket": null,
+    "encryptBucket": null,
+    "bucketType": "OBJECT",
+    "creator": "h00484736",
+    "esSearchPermission": null,
+    "multipleVersionsStatus": null,
+    "glacierSize": "0 Byte",
+    "glacierObjectNumber": "0",
+    "directColdAccess": null
+  }
+}
+(3)获取当前目录下的object信息
+GET
+http:{self.ENDPOINT)/rest/s3/bucket/filelist
+Headers:
+Content-Type="application/json"
+csb-token=""当前应用的apptoken
+Params:
+appid=com.camera.pergen 当前应用的appid
+requestbody=eyJpZCI6ClyMDU4MzQ2Ny02NzY2LTQ2YjktYmUyOSOwYjBINmE3YmYyOTgiLCAicGF0aCI6ClvliwginBvaW50ZXliOiAiliwg/nNpemUiOiAxMDAwfQ==
+其中requestbody得出方式如下：
+param = {
+"id": bucket._id,
+"path":path,
+"pointer": pointer,
+"size":size
+}
+request_body = base64.urlsafe_b64encode(json.dumps(param).encode("utf-8")).decode("utf-8")
+id=20583467-6766-46b9-be29-Ob0eba7bf298 listbuckets 信息中的id，该桶在当前应用的id
+path=‘/’ 文件夹路径必须以 开头，文件夹必须以 ‘/’结尾
+pointer=""
+size=1000   列出当前目录下的object最大数量
+Response:
+{
+  "success": true,
+  "msg": "",
+  "detail": null,
+  "includingDetail": false,
+  "errorCode": null,
+  "objectPath": "",
+  "objects": [
+    {
+      "objectKey": "01.USERS/",
+      "id": null,
+      "name": "01.USERS",
+      "downloadStatus": null,
+      "objectType": "folder",
+      "type": "—",
+      "size": "—",
+      "ownerUserld": null,
+      "status": null,
+      "encryptStatus": "no",
+      "lastModifyDate": null,
+      "permissionRolls": [],
+      "path": "",
+      "osUserName": null,
+      "osPassword": null
+    }
+  ],
+  "offset": "",
+  "nextOffset": "",
+  "pagelnifo": {
+    "pageindex": null,
+    "pagesize": null,
+    "totalCount": null
+  }
+}
+{
+  "success": true,
+  "msg": "",
+  "detail": null,
+  "includingDetail": false,
+  "errorCode": null,
+  "objectPath": "30081480/30081480",
+  "objects": [
+    {
+      "objectKey": "30081480/30081480/user_folder/",
+      "id": null,
+      "name": "user _folder",
+      "downloadStatus": null,
+      "objectType": "Folder",
+      "type": "—",
+      "size": "—",
+      "ownerUserld": null,
+      "status": null,
+      "encryptStatus": "no",
+      "lastModifyDate": null,
+      "permissionRolls": [],
+      "path": "30081480/30081480/",
+      "osUserName": null,
+      "osPassword": null
+    },
+    {
+      "objectKey": "30081480/30081480/CLion-2025.1.3(Config_Plugs).exe",
+      "id": null,
+      "name": "CLion-2025.1.3(Config_Plugs) exe",
+      "downloadStatus": null,
+      "objectType": "object",
+      "type": "STANDARD",
+      "size": "1.32 GB",
+      "ownerUserld": null,
+      "status": null,
+      "encryptStatus": "no",
+      "lastModifyDate": 1767689315000,
+      "permissionRolls": 0,
+      "path": "30081480/30081480/",
+      "osUserName": null,
+      "osPassword": null
+    }
+  ],
+  "offset": "",
+  "nextOffset": "",
+  "pagelnfo": {
+    "pageindex": null,
+    "pagesize": null,
+    "totalCount": null
+  }
+}
+（4）获取object的元信息
+GET
+http:(bucket.endpoint}/rest/
+boto3/s3/object/metadata bucket.endpoint为ndpoint接口获取的result值
+Params:
+vendor=HEC listbuckets信息中的vendor
+region=cn-east-3 listbuckets信息中的region
+bucketid=bucket-1101 listbuckets信息中的name
+apptoken=cbb156df-d7c0-43e7-aad4-175ef5e921df 当前应用的apptoken
+objectkey=LzMwMDg×NDgwLzMwMDgxNDgwL2NvZGUtdjMuMC1MVFMudGFyLmd6
+bucketld=20583467-6766-46b9-be29-0b0e6a7bf298 listbuckets信息中的id，该桶在当前应用的id
+其中objectkey获取方式为
+_path = '/30081480/30081480/code-v3.0-LTS.tar.gz'
+object_key_base64 =base64.urlsafe_b64encode(_path.encodel'utf-8)).decode('utf-8')
+Response:
+{
+  "success": "true",
+  "msg": "ok",
+  "objectKey": {
+    "objectKey": "30081480/30081480/code-v3.0-LTS.tar.gz",
+    "storageType": null,
+    "size": "7521572740",
+    "lastModifyTime": "1767689551000",
+    "md5": null,
+    "nextPosition": 7521572740
+  }
+}
+（5）获取目录下的所有object信息，包括当前目录下的所有层级目录里的object，不获取目录信息 includeFolder=False
+GET
+(bucket.endpoint}/rest/boto3/s3/list/bucket/objectkeys
+bucket.endpoint 为通过endpoint接口获取的result值
+Headers:
+Content-Type='application/json'
+Params:
+vendor=HEC listbuckets信息中的vendor
+region=cn-east-3 listbuckets信息中region
+bucketid=bucket-1191 listbuckets信息中的name
+apptoken=cbb156df-d7c0-4ad4-175ef5e921df 当前应用的apptoken
+objectkey=LzMwMDgxNDgwLzMwMDgxNDgwL3NvZnR3YXJIX2RIbW8vdDYwMDQ3NTM3
+nextmarker="" 下一个标记。该参数指的是下一趟1000个对象的游标。说明：第一趟获取1000个对象时nextmarker设置为""，第二趟获取1000个对象时nextmarker设为上一趟返回的nextmarker值
+bucketld=20583467-6766-46b9-be29-0b0eba7bf298 listbuckets信息中的id，该桶在当前应用的id
+Response:
+{
+  "nextmarker": "",
+  "truncated": "false",
+  "msg": "ok",
+  "success": "true",
+  "objectKeys": [
+    {
+      "objectKey": "30081480/30081480/ software_demo/t60047537/SIM_25111309_4JFm7jrr/ isp_log.log",
+      "storageType": "STANDARD",
+      "size": "878",
+      "lastModifyTime": "1767689275598",
+      "md5": null
+    },
+    {
+      "objectKey": "30081480/30081480/software_demo/t60047537/SIM_25111309_4JFm7jrr/ sim-25111309-4jfm7jrr-down-ckpt-854085816.log",
+      "storageType": "STANDARD",
+      "size": "552",
+      "lastModifyTime": 1767689275614,
+      "md5": null
+    },
+    {
+      "objectKey": "30081480/30081480/software_demo/t60047537/SIM_25111309_rgFC3uQ7/isp_log.log",
+      "storageType": "STANDARD",
+      "size": "882",
+      "lastModifyTime": "17676892757s82",
+      "md5": null
+    }
+  ]
+}
+超大目录、存在空文件、存在超大文件，目录长期未使用
+标记为无异常：6个月内不再将其标记为异常，6个月后将重新判断
+为异常
+已处理：已删除对应文件
