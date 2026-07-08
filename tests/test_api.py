@@ -65,6 +65,26 @@ def test_runs_list_ignores_symlinked_external_run(tmp_path: Path):
     assert "outside-run" not in response.text
 
 
+def test_runs_list_ignores_symlinked_external_manifest(tmp_path: Path):
+    results_dir = tmp_path / "results"
+    run_dir = results_dir / "run-1"
+    run_dir.mkdir(parents=True)
+    outside_manifest = tmp_path / "outside_manifest.json"
+    outside_manifest.write_text(
+        json.dumps({"run_id": "outside-run", "secret": "external-json"}),
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").symlink_to(outside_manifest)
+    client = TestClient(api.create_app(results_dir=results_dir))
+
+    response = client.get("/runs")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    assert "outside-run" not in response.text
+    assert "external-json" not in response.text
+
+
 def test_post_runs_requires_config_path(tmp_path: Path):
     client = TestClient(api.create_app(results_dir=tmp_path))
     response = client.post("/runs")

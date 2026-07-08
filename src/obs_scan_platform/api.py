@@ -60,7 +60,8 @@ def create_app(config_path: Path | None = None, results_dir: Path | None = None)
                 run_dir.resolve().relative_to(resolved_results_dir)
             except ValueError:
                 continue
-            if (run_dir / "manifest.json").exists():
+            manifest_path = run_dir / "manifest.json"
+            if manifest_path.exists() and not manifest_path.is_symlink():
                 manifests.append(_read_manifest(run_dir))
         return manifests
 
