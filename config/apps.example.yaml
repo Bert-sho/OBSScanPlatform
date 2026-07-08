@@ -1,0 +1,31 @@
+scan:
+  results_dir: results
+  temp_subdir: _tmp
+  keep_temp_files: false
+  page_size: 1000
+  app_concurrency: 2
+  bucket_concurrency: 4
+  global_request_concurrency: 50
+  per_bucket_prefix_concurrency: 8
+  metadata_concurrency_per_bucket: 8
+  request_timeout_seconds: 30
+  max_retries: 5
+  retry_base_delay_seconds: 2
+  retry_max_delay_seconds: 60
+
+defaults:
+  large_directory_bytes: 107374182400
+  large_file_bytes: 10737418240
+  inactive_directory_days: 180
+
+applications:
+  - appid: com.camera.pergen
+    name: Example application
+    endpoint: http://example.com
+    apptoken: replace-with-real-token
+    enabled: true
+    buckets:
+      bucket-1191:
+        large_directory_bytes: 214748364800
+        large_file_bytes: 21474836480
+        inactive_directory_days: 365
