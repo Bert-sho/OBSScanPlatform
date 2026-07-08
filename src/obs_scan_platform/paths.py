@@ -3,7 +3,7 @@ import re
 
 
 def normalize_object_key(object_key: str) -> str:
-    return object_key.strip().lstrip("/")
+    return object_key.lstrip("/")
 
 
 def directory_chain_for_object(object_key: str) -> list[str]:
@@ -32,4 +32,5 @@ def safe_filename(value: str) -> str:
 
 def prefix_temp_filename(prefix: str) -> str:
     digest = hashlib.sha1(prefix.encode("utf-8")).hexdigest()[:12]
-    return f"{safe_filename(prefix)}_{digest}.csv"
+    safe_prefix = safe_filename(prefix)[:80]
+    return f"{safe_prefix}_{digest}.csv"
