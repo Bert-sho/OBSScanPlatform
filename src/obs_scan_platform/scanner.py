@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,6 +72,16 @@ def _string_or_empty(value: Any) -> str:
     return str(value)
 
 
+def _rollup_status(statuses: list[str]) -> str:
+    if not statuses:
+        return ScanStatus.SUCCESS.value
+    if all(status == ScanStatus.SUCCESS.value for status in statuses):
+        return ScanStatus.SUCCESS.value
+    if all(status == ScanStatus.FAILED.value for status in statuses):
+        return ScanStatus.FAILED.value
+    return ScanStatus.PARTIAL_FAILED.value
+
+
 class Scanner:
     def __init__(self, config: AppConfigFile) -> None:
         self.config = config
@@ -96,11 +107,7 @@ class Scanner:
 
         app_entries = await asyncio.gather(*(scan_with_limit(application) for application in applications))
         ended_ms = _now_ms()
-        status = ScanStatus.SUCCESS.value
-        if any(entry["status"] == ScanStatus.FAILED.value for entry in app_entries):
-            status = ScanStatus.FAILED.value
-        elif any(entry["status"] == ScanStatus.PARTIAL_FAILED.value for entry in app_entries):
-            status = ScanStatus.PARTIAL_FAILED.value
+        status = _rollup_status([entry["status"] for entry in app_entries])
 
         manifest = {
             "run_id": run_id,
@@ -152,15 +159,19 @@ class Scanner:
                     "buckets": [],
                 }
 
-        status = ScanStatus.SUCCESS.value
-        if any(result.status == ScanStatus.FAILED for result in bucket_results):
-            status = ScanStatus.PARTIAL_FAILED.value
+        status = _rollup_status([result.status.value for result in bucket_results])
         LOGGER.info("application finish appid=%s status=%s", application.appid, status)
         return {
             "appid": application.appid,
             "name": application.name,
             "status": status,
-            "buckets": [self._bucket_result_to_manifest(result) for result in bucket_results],
+            "buckets": [
+                self._bucket_result_to_manifest(
+                    result,
+                    results_dir / self.config.scan.temp_subdir / application.appid / result.bucket_name,
+                )
+                for result in bucket_results
+            ],
         }
 
     async def _list_owned_buckets(self, application: ApplicationConfig, client: OBSClient) -> list[BucketInfo]:
@@ -282,7 +293,7 @@ class Scanner:
             )
             payload = _result_payload(data)
             for item in _items_from_payload(payload, "files", "list", "items"):
-                object_type = item.get("objectType")
+                object_type = str(item.get("objectType") or "").lower()
                 object_key = item.get("objectKey")
                 if object_type == "folder":
                     prefix = str(object_key or item.get("name") or "").strip("/")
@@ -309,28 +320,39 @@ class Scanner:
         temp_dir: Path,
         client: OBSClient,
     ) -> None:
-        semaphore = asyncio.Semaphore(self.config.scan.metadata_concurrency_per_bucket)
         rows: list[ObjectRow] = []
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        for object_key in root_files:
+            queue.put_nowait(object_key)
 
-        async def collect_one(object_key: str) -> None:
-            async with semaphore:
-                data = await client.get_json(
-                    _endpoint(endpoint, "/rest/boto3/s3/object/metadata"),
-                    params={
-                        "vendor": bucket.vendor,
-                        "region": bucket.region,
-                        "bucketid": bucket.name,
-                        "apptoken": application.apptoken,
-                        "objectkey": encode_object_key("/" + object_key.lstrip("/")),
-                        "bucketld": bucket.bucket_id,
-                    },
-                    headers=JSON_HEADERS,
-                )
-            row = self._metadata_to_object_row(object_key, data)
-            if row is not None:
-                rows.append(row)
+        async def worker() -> None:
+            while True:
+                try:
+                    object_key = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    data = await client.get_json(
+                        _endpoint(endpoint, "/rest/boto3/s3/object/metadata"),
+                        params={
+                            "vendor": bucket.vendor,
+                            "region": bucket.region,
+                            "bucketid": bucket.name,
+                            "apptoken": application.apptoken,
+                            "objectkey": encode_object_key("/" + object_key.lstrip("/")),
+                            "bucketld": bucket.bucket_id,
+                        },
+                        headers=JSON_HEADERS,
+                    )
+                    row = self._metadata_to_object_row(object_key, data)
+                    if row is not None:
+                        rows.append(row)
+                finally:
+                    queue.task_done()
 
-        await asyncio.gather(*(collect_one(object_key) for object_key in root_files))
+        worker_count = min(max(1, self.config.scan.metadata_concurrency_per_bucket), len(root_files))
+        if worker_count:
+            await asyncio.gather(*(worker() for _ in range(worker_count)))
         if rows:
             append_object_rows(temp_dir / "root_files.csv", rows)
 
@@ -343,13 +365,24 @@ class Scanner:
         temp_dir: Path,
         client: OBSClient,
     ) -> None:
-        semaphore = asyncio.Semaphore(self.config.scan.per_bucket_prefix_concurrency)
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        for prefix in prefixes:
+            queue.put_nowait(prefix)
 
-        async def collect_with_limit(prefix: str) -> None:
-            async with semaphore:
-                await self._collect_prefix(application, bucket, endpoint, prefix, temp_dir, client)
+        async def worker() -> None:
+            while True:
+                try:
+                    prefix = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    await self._collect_prefix(application, bucket, endpoint, prefix, temp_dir, client)
+                finally:
+                    queue.task_done()
 
-        await asyncio.gather(*(collect_with_limit(prefix) for prefix in prefixes))
+        worker_count = min(max(1, self.config.scan.per_bucket_prefix_concurrency), len(prefixes))
+        if worker_count:
+            await asyncio.gather(*(worker() for _ in range(worker_count)))
 
     async def _collect_prefix(
         self,
@@ -389,7 +422,7 @@ class Scanner:
                 append_object_rows(temp_dir / prefix_temp_filename(prefix), rows)
 
             truncated = payload.get("truncated") if isinstance(payload, dict) else None
-            if truncated is not True and truncated != "true":
+            if str(truncated).lower() != "true":
                 break
             new_marker = str(payload.get("nextmarker") or payload.get("nextMarker") or "")
             if not new_marker or new_marker == next_marker:
@@ -422,8 +455,8 @@ class Scanner:
             last_modified_ms=parse_int_or_none(item.get("lastModifyTime")),
         )
 
-    def _bucket_result_to_manifest(self, result: BucketScanResult) -> dict[str, Any]:
-        return {
+    def _bucket_result_to_manifest(self, result: BucketScanResult, temp_dir: Path | None = None) -> dict[str, Any]:
+        manifest = {
             "bucket_name": result.bucket_name,
             "bucket_id": result.bucket_id,
             "status": result.status.value,
@@ -431,6 +464,14 @@ class Scanner:
             "thresholds": result.thresholds.model_dump(mode="json"),
             "error": result.error,
         }
+        if temp_dir is None:
+            return manifest
+        if result.status == ScanStatus.SUCCESS and not self.config.scan.keep_temp_files:
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+            return manifest
+        manifest["temp_dir"] = str(temp_dir)
+        return manifest
 
 
 async def run_scan(
