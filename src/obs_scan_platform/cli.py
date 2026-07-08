@@ -3,6 +3,11 @@ import typer
 app = typer.Typer(help="OBS scan platform command line tools.")
 
 
+@app.callback()
+def root() -> None:
+    """OBS scan platform command line tools."""
+
+
 @app.command()
 def scan() -> None:
     """Run an OBS scan."""
