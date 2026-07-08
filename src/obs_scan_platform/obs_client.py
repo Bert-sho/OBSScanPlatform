@@ -49,18 +49,20 @@ class OBSClient:
                     response = await self.http.get(url, params=params, headers=headers)
                 if response.status_code >= 500:
                     raise OBSRequestError(f"HTTP {response.status_code}: {response.text}")
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code < 500:
+                        raise
+                    raise OBSRequestError(str(exc)) from exc
                 data = response.json()
                 success = data.get("success")
                 if success in (False, "false"):
                     raise OBSRequestError(str(data.get("msg") or data))
                 return data
-            except (
-                httpx.TimeoutException,
-                httpx.ConnectError,
-                OBSRequestError,
-                httpx.HTTPStatusError,
-            ) as exc:
+            except httpx.HTTPStatusError:
+                raise
+            except (httpx.TimeoutException, httpx.ConnectError, OBSRequestError) as exc:
                 last_error = exc
                 if attempt >= self.max_retries:
                     break
