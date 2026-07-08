@@ -40,6 +40,16 @@ class ConcurrentFakeClient:
             return self.responses.pop(0)
 
 
+class RepeatingRootOffsetClient:
+    def __init__(self):
+        self.calls = []
+
+    async def get_json(self, url, *, params, headers=None):
+        await asyncio.sleep(0)
+        self.calls.append({"url": url, "params": params, "headers": headers})
+        return {"result": {"files": [], "nextOffset": 1}}
+
+
 def make_scanner() -> tuple[Scanner, ApplicationConfig, BucketInfo]:
     application = ApplicationConfig(
         appid="app.one",
@@ -141,6 +151,16 @@ async def test_discover_root_treats_capitalized_folder_as_prefix():
 
     assert discovery.prefixes == ["alpha/"]
     assert discovery.root_files == []
+
+
+@pytest.mark.asyncio
+async def test_discover_root_stops_on_repeated_numeric_next_offset():
+    scanner, application, bucket = make_scanner()
+    client = RepeatingRootOffsetClient()
+
+    await asyncio.wait_for(scanner._discover_root(application, bucket, client), timeout=1)
+
+    assert len(client.calls) == 2
 
 
 @pytest.mark.asyncio

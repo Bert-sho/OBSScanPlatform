@@ -304,10 +304,10 @@ class Scanner:
 
             next_pointer = None
             if isinstance(payload, dict):
-                next_pointer = payload.get("nextOffset")
+                next_pointer = str(payload.get("nextOffset") or "")
             if not next_pointer or next_pointer == pointer:
                 break
-            pointer = str(next_pointer)
+            pointer = next_pointer
 
         return RootDiscovery(prefixes=sorted(prefixes), root_files=root_files)
 
