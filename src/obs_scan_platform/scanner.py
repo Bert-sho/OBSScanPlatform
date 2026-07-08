@@ -433,6 +433,11 @@ class Scanner:
         }
 
 
-def run_scan(config_path: str | Path, run_id: str | None = None, appid: str | None = None) -> dict[str, Any]:
-    config = load_config(config_path)
-    return asyncio.run(Scanner(config).run(run_id=run_id, appid=appid))
+async def run_scan(
+    config_path: str | Path,
+    *,
+    run_id: str | None = None,
+    appid: str | None = None,
+) -> dict[str, Any]:
+    scanner = Scanner(load_config(config_path))
+    return await scanner.run(run_id=run_id, appid=appid)

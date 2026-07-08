@@ -1,11 +1,12 @@
 import csv
+import inspect
 from pathlib import Path
 
 import pytest
 
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds
 from obs_scan_platform.models import BucketInfo
-from obs_scan_platform.scanner import Scanner, is_owned_bucket, parse_int_or_none
+from obs_scan_platform.scanner import Scanner, is_owned_bucket, parse_int_or_none, run_scan
 
 
 class FakeClient:
@@ -48,6 +49,10 @@ def test_parse_int_or_none_handles_dirty_values():
     assert parse_int_or_none(456) == 456
     assert parse_int_or_none("17676892757s82") is None
     assert parse_int_or_none(None) is None
+
+
+def test_run_scan_is_async_public_api():
+    assert inspect.iscoroutinefunction(run_scan)
 
 
 @pytest.mark.asyncio
