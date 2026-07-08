@@ -242,11 +242,11 @@ class Scanner:
         data = await client.get_json(
             _endpoint(application.endpoint, "/rest/s3/bucket/endpoint"),
             params={
-                "bucketid": bucket.bucket_id,
+                "bucketid": bucket.name,
                 "token": application.apptoken,
                 "vendor": bucket.vendor,
                 "region": bucket.region,
-                "bucketUid": bucket.name,
+                "bucketUid": bucket.bucket_id,
             },
             headers=JSON_HEADERS,
         )
@@ -264,7 +264,7 @@ class Scanner:
         prefixes: set[str] = set()
         root_files: list[str] = []
         pointer = ""
-        url = _endpoint(application.endpoint, "/rest/s3/filelist")
+        url = _endpoint(application.endpoint, "/rest/s3/bucket/filelist")
 
         while True:
             request_body = encode_request_body(
@@ -319,10 +319,10 @@ class Scanner:
                     params={
                         "vendor": bucket.vendor,
                         "region": bucket.region,
-                        "bucketid": bucket.bucket_id,
+                        "bucketid": bucket.name,
                         "apptoken": application.apptoken,
                         "objectkey": encode_object_key("/" + object_key.lstrip("/")),
-                        "bucketld": bucket.name,
+                        "bucketld": bucket.bucket_id,
                     },
                     headers=JSON_HEADERS,
                 )
@@ -368,11 +368,11 @@ class Scanner:
                 params={
                     "vendor": bucket.vendor,
                     "region": bucket.region,
-                    "bucketid": bucket.bucket_id,
+                    "bucketid": bucket.name,
                     "apptoken": application.apptoken,
                     "objectkey": encode_object_key("/" + prefix.lstrip("/")),
                     "nextmarker": next_marker,
-                    "bucketld": bucket.name,
+                    "bucketld": bucket.bucket_id,
                 },
                 headers=JSON_HEADERS,
             )
@@ -388,7 +388,8 @@ class Scanner:
             if rows:
                 append_object_rows(temp_dir / prefix_temp_filename(prefix), rows)
 
-            if not isinstance(payload, dict) or not payload.get("truncated"):
+            truncated = payload.get("truncated") if isinstance(payload, dict) else None
+            if truncated is not True and truncated != "true":
                 break
             new_marker = str(payload.get("nextmarker") or payload.get("nextMarker") or "")
             if not new_marker or new_marker == next_marker:
