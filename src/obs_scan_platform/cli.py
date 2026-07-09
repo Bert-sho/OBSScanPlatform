@@ -20,7 +20,7 @@ def scan(
     run_id: str | None = typer.Option(None, "--run-id", help="Use a fixed run id"),
 ) -> None:
     """Run an OBS scan."""
-    manifest = asyncio.run(run_scan(config, run_id=run_id, appid=appid))
+    manifest = asyncio.run(run_scan(config, run_id=run_id, appid=appid, show_progress=True))
     typer.echo(f"scan finished: {manifest['status']} run_id={manifest['run_id']}")
     if manifest["status"] != "success":
         raise typer.Exit(code=1)

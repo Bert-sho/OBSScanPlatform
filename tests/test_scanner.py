@@ -61,6 +61,23 @@ class RepeatingRootOffsetClient:
         return {"result": {"files": [], "nextOffset": 1}}
 
 
+class DummyProgressBar:
+    def __init__(self):
+        self.total = 0
+        self.updates: list[int] = []
+        self.refreshes = 0
+        self.closed = False
+
+    def update(self, count: int) -> None:
+        self.updates.append(count)
+
+    def refresh(self) -> None:
+        self.refreshes += 1
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def decode_request_body(call: dict[str, Any]) -> dict[str, Any]:
     return json.loads(base64.urlsafe_b64decode(call["params"]["requestbody"].encode("utf-8")).decode("utf-8"))
 
@@ -262,6 +279,64 @@ async def test_discover_root_recurses_to_filelist_depth_and_finds_nested_prefixe
     assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/"]
     assert discovery.prefixes == ["alpha/"]
     assert discovery.root_files == ["root.txt"]
+
+
+@pytest.mark.asyncio
+async def test_discover_root_logs_filelist_progress(caplog: pytest.LogCaptureFixture):
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "alpha/"}],
+                    "nextOffset": "",
+                }
+            },
+            {"result": {"files": [], "nextOffset": ""}},
+        ]
+    )
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        await scanner._discover_root(application, bucket, client)
+
+    progress_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "filelist progress appid=app.one bucket=bucket-name-1" in record.getMessage()
+    ]
+    assert progress_messages == [
+        "filelist progress appid=app.one bucket=bucket-name-1 completed=1 total=2",
+        "filelist progress appid=app.one bucket=bucket-name-1 completed=2 total=2",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_discover_root_updates_progress_bar_when_enabled(monkeypatch: pytest.MonkeyPatch):
+    scanner, application, bucket = make_scanner()
+    scanner.show_progress = True
+    progress_bar = DummyProgressBar()
+    monkeypatch.setattr(scanner, "_filelist_progress_bar", lambda app, bucket_info, total: progress_bar)
+    client = FakeClient([{"result": {"files": [], "nextOffset": ""}}])
+
+    await scanner._discover_root(application, bucket, client)
+
+    assert progress_bar.total == 1
+    assert progress_bar.updates == [1]
+    assert progress_bar.closed is True
+
+
+@pytest.mark.asyncio
+async def test_discover_root_does_not_create_progress_bar_by_default(monkeypatch: pytest.MonkeyPatch):
+    scanner, application, bucket = make_scanner()
+
+    def fail_progress_bar(app, bucket_info, total):
+        raise AssertionError("progress bar should not be created")
+
+    monkeypatch.setattr(scanner, "_filelist_progress_bar", fail_progress_bar)
+    client = FakeClient([{"result": {"files": [], "nextOffset": ""}}])
+
+    await scanner._discover_root(application, bucket, client)
 
 
 @pytest.mark.asyncio

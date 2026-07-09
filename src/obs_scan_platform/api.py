@@ -85,7 +85,7 @@ def create_app(config_path: Path | None = None, results_dir: Path | None = None)
 
     async def _run_scan_background() -> None:
         try:
-            await run_scan(config_path)
+            await run_scan(config_path, show_progress=False)
         finally:
             app.state.active_scan = False
 

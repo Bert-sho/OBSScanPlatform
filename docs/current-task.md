@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Task 4: empty bucket success and bucket duration logs
+Task 5: filelist progress logging and CLI tqdm
 
 ## Current branch
 
@@ -14,49 +14,54 @@ Task 4: empty bucket success and bucket duration logs
 
 ## User goal
 
-Ensure empty buckets and buckets containing only empty folders finish successfully with header-only bucket CSV files, and add per-bucket elapsed-time logging for both success and failure paths.
+Only show concise filelist progress during scans: write per-bucket filelist completed/total progress into `scan.log`, enable `tqdm` progress bars for command-line scans, and keep FastAPI-triggered scans free of terminal progress bars.
 
 ## Completed work
 
-- Added regression coverage for `aggregate_bucket()` when the temp object-row directory does not exist.
-- Added `_scan_bucket()` coverage proving an empty bucket writes a header-only CSV, returns success, and logs a finish message with `status=success` and `elapsed_seconds=...`.
-- Added end-to-end coverage for a bucket whose root filelist contains `empty/` and whose `/empty/` objectkeys response is empty.
-- Added bucket elapsed-time logging in `_scan_bucket()` using `time.monotonic()` for both success and exception paths.
-- Preserved exception stack logging on bucket failures via `LOGGER.exception()`.
+- Added runtime dependency `tqdm>=4.66`.
+- Added `show_progress` to `Scanner` and `run_scan()`.
+- Updated CLI `obs-scan scan` to pass `show_progress=True`.
+- Updated FastAPI background scan to pass `show_progress=False`.
+- Added per-directory filelist progress logs with `completed` and `total`.
+- Added optional per-bucket tqdm progress bars for CLI scans only.
+- Added tests for scanner progress logging, progress-bar creation, CLI progress enablement, and API progress disablement.
 
 ## Remaining work
 
-None for Task 4.
+None for Task 5.
 
 ## Key files changed
 
+- `pyproject.toml`
 - `src/obs_scan_platform/scanner.py`
-- `tests/test_aggregation.py`
+- `src/obs_scan_platform/cli.py`
+- `src/obs_scan_platform/api.py`
 - `tests/test_scanner.py`
-- `tests/test_scan_end_to_end.py`
+- `tests/test_cli.py`
+- `tests/test_api.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
-- Red: `pytest tests/test_aggregation.py::test_aggregate_bucket_writes_header_only_when_temp_dir_is_missing tests/test_scanner.py::test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elapsed -v`
-- Focused green: `pytest tests/test_aggregation.py::test_aggregate_bucket_writes_header_only_when_temp_dir_is_missing tests/test_scanner.py::test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elapsed tests/test_scan_end_to_end.py::test_scanner_run_succeeds_with_empty_folder_and_header_only_csv -v`
-- Required green: `pytest tests/test_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -v`
+- Red: `pytest tests/test_scanner.py::test_discover_root_logs_filelist_progress tests/test_scanner.py::test_discover_root_updates_progress_bar_when_enabled tests/test_cli.py::test_scan_success_path tests/test_api.py::test_post_runs_accepts_scan_and_resets_active_scan -v`
+- Focused green: `pytest tests/test_scanner.py::test_discover_root_logs_filelist_progress tests/test_scanner.py::test_discover_root_updates_progress_bar_when_enabled tests/test_scanner.py::test_discover_root_does_not_create_progress_bar_by_default tests/test_cli.py::test_scan_success_path tests/test_api.py::test_post_runs_accepts_scan_and_resets_active_scan -v`
+- Required green: `pytest tests/test_scanner.py tests/test_cli.py tests/test_api.py -v`
 - Full suite: `pytest -q`
 
 ## Validation result
 
-- Red run before implementation: aggregation test passed because existing iterator behavior already treated missing temp dirs as empty; scanner test failed because bucket finish logs lacked `status=success` and `elapsed_seconds=...`.
-- Focused green after implementation: `3 passed in 0.09s`.
-- Required green after implementation: `32 passed in 0.24s`.
-- Full suite after implementation: `78 passed, 1 warning in 0.42s`.
+- Red run failed before implementation: missing filelist progress logs, missing progress-bar hook, and CLI passed `show_progress=False`.
+- Focused green after implementation: `5 passed, 1 warning`.
+- Required green after implementation: `45 passed, 1 warning`.
+- Full suite after implementation: `81 passed, 1 warning`.
 - Warning: existing Starlette deprecation warning from `fastapi.testclient` importing `httpx`.
 
 ## Known risks
 
-- Failure elapsed logging is implemented but not separately unit-tested; success logging is covered with `caplog`.
-- Empty bucket and empty folder success depend on the existing aggregation behavior that writes the final CSV header even when `iter_object_rows(temp_dir)` yields no rows.
+- `tqdm` is lazily imported and only covered through a monkeypatched progress-bar factory, not through real terminal rendering.
+- Filelist `total` is dynamic and capped by `filelist_task_limit_per_bucket`; logs reflect discovered scheduled tasks at the time each directory completes.
 
 ## Next recommended action
 
-Review the Task 4 commit and continue with the next queued task.
+Review and commit Task 5, then continue with Task 6 documentation and end-to-end compatibility.

@@ -255,8 +255,8 @@ def test_post_runs_accepts_scan_and_resets_active_scan(tmp_path: Path, monkeypat
     _write_config(config_path)
     called_with = []
 
-    async def fake_run_scan(path):
-        called_with.append(path)
+    async def fake_run_scan(path, *, show_progress=False):
+        called_with.append((path, show_progress))
 
     monkeypatch.setattr(api, "run_scan", fake_run_scan)
     client = TestClient(api.create_app(config_path=config_path, results_dir=tmp_path))
@@ -265,7 +265,7 @@ def test_post_runs_accepts_scan_and_resets_active_scan(tmp_path: Path, monkeypat
 
     assert response.status_code == 202
     assert response.json() == {"status": "accepted"}
-    assert called_with == [config_path]
+    assert called_with == [(config_path, False)]
     assert client.app.state.active_scan is False
 
 
@@ -273,7 +273,7 @@ def test_post_runs_returns_conflict_when_scan_active(tmp_path: Path, monkeypatch
     config_path = tmp_path / "apps.yaml"
     _write_config(config_path)
 
-    async def fake_run_scan(path):
+    async def fake_run_scan(path, *, show_progress=False):
         raise AssertionError("run_scan should not be called")
 
     monkeypatch.setattr(api, "run_scan", fake_run_scan)
@@ -289,7 +289,7 @@ def test_post_runs_resets_active_scan_after_failure(tmp_path: Path, monkeypatch)
     config_path = tmp_path / "apps.yaml"
     _write_config(config_path)
 
-    async def fake_run_scan(path):
+    async def fake_run_scan(path, *, show_progress=False):
         raise RuntimeError("scan failed")
 
     monkeypatch.setattr(api, "run_scan", fake_run_scan)

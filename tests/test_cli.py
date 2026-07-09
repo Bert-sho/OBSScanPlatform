@@ -12,10 +12,11 @@ def test_scan_requires_config():
 def test_scan_success_path(monkeypatch):
     calls = {}
 
-    async def fake_run_scan(config, *, run_id=None, appid=None):
+    async def fake_run_scan(config, *, run_id=None, appid=None, show_progress=False):
         calls["config"] = config
         calls["run_id"] = run_id
         calls["appid"] = appid
+        calls["show_progress"] = show_progress
         return {"status": "success", "run_id": "run-1"}
 
     monkeypatch.setattr("obs_scan_platform.cli.run_scan", fake_run_scan)
@@ -38,10 +39,11 @@ def test_scan_success_path(monkeypatch):
     assert str(calls["config"]).endswith("config/apps.yaml")
     assert calls["appid"] == "app.one"
     assert calls["run_id"] == "run-1"
+    assert calls["show_progress"] is True
 
 
 def test_scan_non_success_path_exits_one(monkeypatch):
-    async def fake_run_scan(config, *, run_id=None, appid=None):
+    async def fake_run_scan(config, *, run_id=None, appid=None, show_progress=False):
         return {"status": "partial_failed", "run_id": "run-2"}
 
     monkeypatch.setattr("obs_scan_platform.cli.run_scan", fake_run_scan)
