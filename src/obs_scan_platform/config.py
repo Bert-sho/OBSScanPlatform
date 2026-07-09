@@ -26,7 +26,7 @@ class Thresholds(BaseModel):
     large_directory_bytes: int
     large_file_bytes: int
     inactive_directory_days: int
-    filelist_depth: int = Field(default=5, exclude=True)
+    filelist_depth: int = 5
 
 
 class BucketOverrides(BaseModel):

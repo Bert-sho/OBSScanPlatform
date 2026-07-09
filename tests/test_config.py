@@ -74,6 +74,7 @@ applications:
     masked = config.masked_dict()
 
     assert masked["endpoint"] == "http://obs.example"
+    assert masked["defaults"]["filelist_depth"] == 5
     assert masked["applications"][0]["apptoken"] == "******"
 
 
