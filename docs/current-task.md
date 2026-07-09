@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Design: OBS scan behavior corrections, phase ordering, and concurrency defaults
+Plan: OBS scan behavior corrections implementation
 
 ## Current branch
 
@@ -14,7 +14,7 @@ Design: OBS scan behavior corrections, phase ordering, and concurrency defaults
 
 ## User goal
 
-Capture the approved design for fixing scanner behavior before implementation:
+Synchronize `AGENTS.md` from the repository `master` branch into `codex/obs-scan-platform`, then enter the next Superpowers step by writing an implementation plan for the approved scanner behavior corrections:
 
 - Default CLI and `scan.log` output must not print request links, query strings, bodies, or tokens.
 - Failed requests such as `404` and `503` must still log safe status/reason diagnostics.
@@ -26,42 +26,41 @@ Capture the approved design for fixing scanner behavior before implementation:
 
 ## Completed work
 
-- Used the Superpowers brainstorming workflow and kept this turn in design/spec mode.
-- Added `docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md`.
-- Recorded that erroneous empty-bucket OBS interface failures are out of scope for this correction.
-- Documented sanitized request failure logging requirements.
-- Documented shared-bucket selection behavior for `scan_shared_buckets`.
-- Documented level-based `filelist` scheduling semantics and examples.
-- Documented the required per-bucket phase order: bucket endpoint, full filelist discovery, metadata, objectkeys, aggregation.
-- Documented `objectkeys_concurrency_per_bucket` with compatibility for the old `per_bucket_prefix_concurrency` field.
+- Fetched `origin/master`.
+- Restored `AGENTS.md` from `origin/master` into the current `codex/obs-scan-platform` branch.
+- Used the Superpowers writing-plans workflow.
+- Added `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md`.
+- Mapped the implementation across config, OBS client, filelist discovery, scanner phase ordering, docs, and tests.
+- Self-reviewed the plan for spec coverage, draft markers, and interface consistency.
 
 ## Remaining work
 
-- Wait for explicit user approval of the design document.
-- After approval, use the Superpowers writing-plans workflow before editing implementation code.
-- Implement tests and code changes in a follow-up task.
+- Choose an execution mode for the plan.
+- Implement the plan task by task, preferably with `superpowers:subagent-driven-development`.
+- Run targeted tests and the full test suite during implementation.
 
 ## Key files changed
 
-- `docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md`
+- `AGENTS.md`
+- `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
-- `rg -n 'T''BD|TO''DO|place''holder|\\?\\?|pend''ing|may''be|should ''choose' docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md docs/current-task.md docs/handoff.md`
+- `rg -n 'T''BD|TO''DO|implement ''later|fill in ''details|appropriate ''error handling|Write tests for the ''above|Similar ''to|\\?\\?|pend''ing|may''be|should ''choose' docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md`
 - `/opt/homebrew/bin/git diff --check`
 
 ## Validation result
 
-- No unresolved draft markers were found after the design wording was tightened.
+- No unresolved draft markers were found in the implementation plan or design spec.
 - `git diff --check` passed.
 
 ## Known risks
 
-- No production code has been changed yet; the listed behavior gaps remain until the next implementation task.
+- No production scanner code has been changed yet; the listed behavior gaps remain until the implementation plan is executed.
 - The design intentionally leaves bad empty-bucket OBS interface responses as real failures because the user deferred that issue.
 
 ## Next recommended action
 
-Ask the user to review and approve `docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md`. If approved, proceed to a writing-plans step, then implement tests and code.
+Execute `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md` using Subagent-Driven development unless the user chooses Inline Execution.
