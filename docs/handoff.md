@@ -2,14 +2,13 @@
 
 ## Timestamp
 
-2026-07-09 18:27 CST
+2026-07-09 19:37 CST
 
 ## Machine/environment
 
 - Codex desktop app on macOS.
 - Worktree: `/Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform`
 - Branch: `codex/obs-scan-platform`
-- Python: 3.11.6
 - Timezone: Asia/Shanghai
 
 ## Current branch
@@ -18,67 +17,51 @@
 
 ## Latest commit before this session
 
-`5ca45b2f3b9985e112aaee4a52dacee146ef1001` (`docs: update task 5 handoff state`)
+`7ae49665795f4dcb5cd5b1dd31e4eae10db18c12` (`docs: finalize task 6 handoff`)
 
 ## Latest commit after this session
 
-Task 6 documentation delivery commit:
-
-`13afcbbd8ac2f42653b809ecf14433a729d26ad6` (`docs: update scan operation guidance`)
-
-This docs-only handoff correction follows that delivery commit. The final branch tip after this correction is reported in the Codex final response.
+This session creates a docs-only design commit. The final immutable commit hash is reported in the Codex final response after commit and push.
 
 ## Summary of what changed
 
-- `README.md`
-  - Added recommended top-level OBS API endpoint config shape.
-  - Documented `scan_shared_buckets`.
-  - Documented default `filelist_depth=5` and `scan.filelist_task_limit_per_bucket=100`.
-  - Documented per-bucket `filelist_depth` overrides without repeating threshold values.
-  - Documented CLI `tqdm` progress and FastAPI non-interactive scan behavior.
-- `docs/scan-start-guide.md`
-  - Updated Chinese startup instructions for global endpoint config.
-  - Added shared bucket opt-in guidance.
-  - Added bounded recursive filelist guidance.
-  - Added CLI tqdm and FastAPI scan log guidance.
-  - Documented `scan.log` filelist progress and bucket elapsed logs.
-  - Documented empty bucket / empty folder success with header-only CSV.
-- `docs/current-task.md`
-  - Updated current task metadata for Task 6.
+- Added `docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md`.
+- Updated `docs/current-task.md` for the current design task.
+- Updated this handoff for the next Codex session.
+- No production scanner code or tests were edited in this session.
 
 ## Important decisions and rationale
 
-- No scanner/test production behavior changed in Task 6; earlier tasks already updated E2E tests to use top-level endpoint config.
-- The startup guide remains the primary Chinese operational guide instead of adding a duplicate CLI guide.
-- The docs explain that CLI progress bars are terminal-only while FastAPI users should read `scan.log` or `/runs/{run_id}/logs`.
+- The user approved a design-first path using Superpowers brainstorming, so this session stayed in specification mode.
+- Request links, query strings, request bodies, and tokens must not appear in default terminal logs or `scan.log`.
+- Failed requests such as `404` and `503` must still be logged with sanitized endpoint/status/reason details.
+- Bad empty-bucket OBS interface responses are explicitly out of scope for now.
+- `scan_shared_buckets: true` should include scan-capable shared listbuckets entries even when `auth` is not `owner`.
+- `filelist_task_limit_per_bucket` is a target threshold for deciding whether to recurse deeper, not a hard cap on the current level.
+- Each bucket must complete all filelist discovery and metadata collection before starting objectkeys collection.
+- Default request concurrency should be raised to `150` globally, with `objectkeys` per-bucket concurrency defaulting to `30`.
 
 ## Failed attempts or rejected approaches
 
-- No failed code attempt in Task 6. This was a documentation synchronization task.
+- No code attempts were made.
+- An earlier ambiguous metadata sentence was tightened so the spec no longer defers the core behavior choice to implementation.
 
 ## Current test/build status
 
-End-to-end scan tests:
+Docs-only validation:
 
 ```bash
-pytest tests/test_scan_end_to_end.py -v
+rg -n 'T''BD|TO''DO|place''holder|\\?\\?|pend''ing|may''be|should ''choose' docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md docs/current-task.md docs/handoff.md
+/opt/homebrew/bin/git diff --check
 ```
 
-Result: `2 passed in 0.13s`.
+Result: both checks passed.
 
-Full suite:
-
-```bash
-pytest -q
-```
-
-Result: `81 passed, 1 warning in 0.42s`.
-
-Warning: existing Starlette deprecation warning from `fastapi.testclient` importing `httpx`.
+Full Python tests were not run because this session only adds a design document and updates handoff docs.
 
 ## Uncommitted changes
 
-None. The Task 6 documentation delivery commit `13afcbbd8ac2f42653b809ecf14433a729d26ad6` has been pushed to `origin/codex/obs-scan-platform`; this handoff correction should also leave the worktree clean after commit and push.
+None expected at the end of this session. The final Codex response should confirm `git status --short --branch` after push.
 
 ## Exact resume instructions
 
@@ -88,18 +71,19 @@ None. The Task 6 documentation delivery commit `13afcbbd8ac2f42653b809ecf14433a7
 cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
 ```
 
-2. Check branch, status, and latest commit:
+2. Check branch and status:
 
 ```bash
 /opt/homebrew/bin/git status --short --branch
 /opt/homebrew/bin/git rev-parse HEAD
 ```
 
-3. If you need a confidence check, run:
+3. Ask the user to review the design:
 
-```bash
-pytest tests/test_scan_end_to_end.py -v
-pytest -q
+```text
+请审核 docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md。
 ```
 
-4. Continue only if a new follow-up task is requested.
+4. Do not edit implementation code until the user explicitly approves the design.
+
+5. After approval, use the Superpowers writing-plans workflow before implementing tests and code.

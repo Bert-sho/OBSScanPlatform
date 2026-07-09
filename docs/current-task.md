@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Task 6: documentation and end-to-end compatibility
+Design: OBS scan behavior corrections, phase ordering, and concurrency defaults
 
 ## Current branch
 
@@ -14,44 +14,54 @@ Task 6: documentation and end-to-end compatibility
 
 ## User goal
 
-Keep the user-facing scan startup documentation aligned with the implemented scanner behavior: global endpoint configuration, shared bucket opt-in, bounded recursive `filelist` discovery, CLI `tqdm` progress, FastAPI non-interactive scans, filelist progress logs, bucket elapsed logs, and empty-bucket success behavior.
+Capture the approved design for fixing scanner behavior before implementation:
+
+- Default CLI and `scan.log` output must not print request links, query strings, bodies, or tokens.
+- Failed requests such as `404` and `503` must still log safe status/reason diagnostics.
+- `scan_shared_buckets: true` must scan scan-capable shared bucket entries.
+- Recursive `filelist` scheduling must process whole levels; the task limit is a deeper-recursion threshold, not a hard cap for the current level.
+- A bucket must finish all `filelist` discovery and metadata collection before any `objectkeys` collection starts.
+- Default global request concurrency should be `150`.
+- Default per-bucket `objectkeys` concurrency should be `30`.
 
 ## Completed work
 
-- Updated `README.md` with the recommended top-level endpoint config shape.
-- Documented `scan_shared_buckets` and per-bucket `filelist_depth` overrides.
-- Documented bounded recursive `filelist` discovery and `scan.filelist_task_limit_per_bucket`.
-- Documented CLI `tqdm` progress behavior.
-- Documented that FastAPI scans do not show progress bars and should use logs for progress.
-- Updated `docs/scan-start-guide.md` with the same operational guidance in Chinese.
-- Confirmed the current end-to-end tests already use top-level endpoint config and pass.
+- Used the Superpowers brainstorming workflow and kept this turn in design/spec mode.
+- Added `docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md`.
+- Recorded that erroneous empty-bucket OBS interface failures are out of scope for this correction.
+- Documented sanitized request failure logging requirements.
+- Documented shared-bucket selection behavior for `scan_shared_buckets`.
+- Documented level-based `filelist` scheduling semantics and examples.
+- Documented the required per-bucket phase order: bucket endpoint, full filelist discovery, metadata, objectkeys, aggregation.
+- Documented `objectkeys_concurrency_per_bucket` with compatibility for the old `per_bucket_prefix_concurrency` field.
 
 ## Remaining work
 
-None for Task 6.
+- Wait for explicit user approval of the design document.
+- After approval, use the Superpowers writing-plans workflow before editing implementation code.
+- Implement tests and code changes in a follow-up task.
 
 ## Key files changed
 
-- `README.md`
-- `docs/scan-start-guide.md`
+- `docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
-- `pytest tests/test_scan_end_to_end.py -v`
-- `pytest -q`
+- `rg -n 'T''BD|TO''DO|place''holder|\\?\\?|pend''ing|may''be|should ''choose' docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md docs/current-task.md docs/handoff.md`
+- `/opt/homebrew/bin/git diff --check`
 
 ## Validation result
 
-- End-to-end scan tests: `2 passed in 0.13s`.
-- Full suite: `81 passed, 1 warning in 0.42s`.
-- Warning: existing Starlette deprecation warning from `fastapi.testclient` importing `httpx`.
+- No unresolved draft markers were found after the design wording was tightened.
+- `git diff --check` passed.
 
 ## Known risks
 
-- Documentation describes the current CLI/API behavior but does not include rendered terminal screenshots of tqdm output.
+- No production code has been changed yet; the listed behavior gaps remain until the next implementation task.
+- The design intentionally leaves bad empty-bucket OBS interface responses as real failures because the user deferred that issue.
 
 ## Next recommended action
 
-Task 6 is committed and pushed. Continue only if a new follow-up task is requested.
+Ask the user to review and approve `docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md`. If approved, proceed to a writing-plans step, then implement tests and code.
