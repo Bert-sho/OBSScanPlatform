@@ -91,3 +91,12 @@ Observed result after implementation:
 - Validation commands and result:
   - `/opt/homebrew/bin/git diff --check` -> passed
   - `rg -n "Pending the Task 1 commit|ready to commit|Commit and push the Task 1 changes" docs/current-task.md docs/handoff.md` -> no matches
+
+## Second review fix
+
+- Review finding summary: `docs/handoff.md` still needed a concrete latest post-session commit hash, and `docs/current-task.md` needed to list itself in Key files changed.
+- Files changed: `docs/current-task.md`, `docs/handoff.md`, `.superpowers/sdd/task-1-report.md`
+- Validation commands and result:
+  - `/opt/homebrew/bin/git diff --check` -> pending
+  - `rg -n "FINAL_TASK1_HANDOFF_COMMIT" docs/handoff.md` -> pending
+  - `/opt/homebrew/bin/git rev-parse HEAD` comparison against `docs/handoff.md` -> pending

@@ -43,6 +43,7 @@ Implement the Task 1 config changes for the OBS scan platform:
 - `tests/test_config.py`
 - `config/apps.example.yaml`
 - `docs/scan-start-guide.md`
+- `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
