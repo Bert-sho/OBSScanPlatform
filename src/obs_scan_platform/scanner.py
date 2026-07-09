@@ -212,6 +212,7 @@ class Scanner:
         results_dir: Path,
         scan_started_ms: int,
     ) -> BucketScanResult:
+        bucket_started = time.monotonic()
         LOGGER.info("bucket start appid=%s bucket=%s", application.appid, bucket.name)
         thresholds = self.config.thresholds_for(application, bucket.name)
         temp_dir = results_dir / self.config.scan.temp_subdir / application.appid / bucket.name
@@ -232,7 +233,13 @@ class Scanner:
                 scan_started_ms=scan_started_ms,
             )
         except Exception as exc:
-            LOGGER.exception("bucket failure appid=%s bucket=%s", application.appid, bucket.name)
+            elapsed_seconds = time.monotonic() - bucket_started
+            LOGGER.exception(
+                "bucket failure appid=%s bucket=%s elapsed_seconds=%.3f",
+                application.appid,
+                bucket.name,
+                elapsed_seconds,
+            )
             return BucketScanResult(
                 appid=application.appid,
                 bucket_name=bucket.name,
@@ -243,7 +250,14 @@ class Scanner:
                 error=str(exc),
             )
 
-        LOGGER.info("bucket finish appid=%s bucket=%s", application.appid, bucket.name)
+        elapsed_seconds = time.monotonic() - bucket_started
+        LOGGER.info(
+            "bucket finish appid=%s bucket=%s status=%s elapsed_seconds=%.3f",
+            application.appid,
+            bucket.name,
+            ScanStatus.SUCCESS.value,
+            elapsed_seconds,
+        )
         return BucketScanResult(
             appid=application.appid,
             bucket_name=bucket.name,

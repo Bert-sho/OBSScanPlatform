@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-09 13:38 CST
+2026-07-09 13:49 CST
 
 ## Machine/environment
 
@@ -18,88 +18,86 @@
 
 ## Latest commit before this session
 
-`67a3d4de83e3128738bb5a3adb5c52a834d359fa` (`fix: avoid overlapping prefix object scans`)
+`dab05d737d5ac519d45460694377c8010375bf5f`
 
 ## Latest commit after this session
 
-Final Task 3 branch tip recorded by the prior handoff correction:
-
-`42c3c36ece8aff4ae6676c4ffcf30bef3e497d1a` (`docs: record parent prefix coverage handoff`)
-
-Task 3 code repair commit:
-
-`37b0b1d48b0ac844e4bc6f0563b2ee73992210a4` (`fix: preserve parent prefix coverage`)
-
-This final docs-only correction keeps the handoff self-contained: `37b0b1d48b0ac844e4bc6f0563b2ee73992210a4` is the scanner/test fix, and `42c3c36ece8aff4ae6676c4ffcf30bef3e497d1a` is the handoff commit that was the pushed branch tip before this final documentation cleanup.
+The final Task 4 commit contains this handoff file, so this document does not try to predict its own commit hash. After commit, run `git rev-parse HEAD` to get the exact branch tip.
 
 ## Summary of what changed
 
-This session supplements Task 3 commits `4a404aa355f599ad874c2e94ab21cbbe0b077730` and `67a3d4de83e3128738bb5a3adb5c52a834d359fa`.
-
 - `src/obs_scan_platform/scanner.py`
-  - Replaced boundary-only final prefix selection with top-level discovered prefix selection.
-  - `_discover_root()` still discovers directories recursively according to depth/task limits.
-  - Final `RootDiscovery.prefixes` now keeps ancestor prefixes such as `alpha/` and omits covered descendants such as `alpha/beta/`.
-  - Root files still populate `root_files`; non-root filelist objects are still not individually added.
+  - `_scan_bucket()` now records `time.monotonic()` at bucket start.
+  - Success logs now include `status=success` and `elapsed_seconds=...`.
+  - Failure logs now include `elapsed_seconds=...` while preserving `LOGGER.exception()` stack traces.
+- `tests/test_aggregation.py`
+  - Added coverage that `aggregate_bucket()` creates a header-only bucket CSV and returns `0` when `temp_dir` is missing.
 - `tests/test_scanner.py`
-  - Updated recursive depth and task-limit expectations to require parent prefix coverage.
+  - Added `_scan_bucket()` coverage for an empty bucket producing a header-only CSV, success status, and elapsed finish logging.
 - `tests/test_scan_end_to_end.py`
-  - Added a mocked parent direct file plus child directory case.
-  - Asserted the objectkeys API is called only for `/alpha/`.
-  - Asserted final aggregation includes `/alpha/` direct coverage and one `/alpha/beta/` child object without duplicate counting.
+  - Added mocked OBS end-to-end coverage for a bucket whose root filelist contains only `empty/` and whose objectkeys response for `/empty/` is empty.
+  - Asserted the manifest bucket status is `success` and the final bucket CSV contains only the header.
 
 ## Important decisions and rationale
 
-- Chose option A from the review: keep parent prefixes and remove child prefixes already covered by recursive objectkeys scans.
-- This is the smallest reliable correctness fix because objectkeys scans are recursive.
-- Option B was rejected for this task because collecting non-root direct file metadata/temp CSV rows would add a second collection path and more risk.
+- No production change was needed in `aggregate_bucket()` because the existing loop over `iter_object_rows(temp_dir)` already treats a missing temp dir or no object-row CSVs as empty and still writes the final header.
+- The production change is limited to bucket timing logs in `scanner.py`.
+- `time.monotonic()` is used for elapsed duration because it is appropriate for measuring intervals.
+- No request-level logging was added.
 - `config.py` was not modified.
 
 ## Failed attempts or rejected approaches
 
-- Red run before implementation failed with `alpha/beta/` returned instead of `alpha/`.
-- The previous fix `67a3d4de83e3128738bb5a3adb5c52a834d359fa` avoided duplicate child scans but could drop direct files in expanded parent directories.
-- Option B was rejected as broader than necessary.
-
-## Current test/build status
-
-Red run before implementation:
+- Red run before implementation:
 
 ```bash
-pytest tests/test_scanner.py::test_discover_root_recurses_to_filelist_depth_and_finds_nested_prefixes tests/test_scanner.py::test_discover_root_limits_recursive_filelist_tasks_but_keeps_discovered_prefixes tests/test_scan_end_to_end.py::test_scanner_run_completes_with_mocked_obs_and_directory_csv -v
+pytest tests/test_aggregation.py::test_aggregate_bucket_writes_header_only_when_temp_dir_is_missing tests/test_scanner.py::test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elapsed -v
 ```
 
-Result: 3 failed. Unit tests showed `alpha/beta/` was returned instead of `alpha/`; E2E failed while current discovery tried to filelist `/alpha/beta/` and did not preserve parent prefix coverage.
+Result: aggregation test passed because the behavior already worked; scanner test failed with `AssertionError: assert 'status=success' in 'bucket finish appid=app.one bucket=bucket-name-1'`, proving the finish log lacked the required fields.
+
+- Initial empty-folder E2E fake client only handled root filelist. The scanner correctly recursed into `/empty/` per existing `filelist_depth`, so the fake was corrected to return an empty filelist for `/empty/` before objectkeys returns an empty list.
+
+## Current test/build status
 
 Focused green after implementation:
 
 ```bash
-pytest tests/test_scanner.py::test_discover_root_recurses_to_filelist_depth_and_finds_nested_prefixes tests/test_scanner.py::test_discover_root_limits_recursive_filelist_tasks_but_keeps_discovered_prefixes tests/test_scan_end_to_end.py::test_scanner_run_completes_with_mocked_obs_and_directory_csv -v
+pytest tests/test_aggregation.py::test_aggregate_bucket_writes_header_only_when_temp_dir_is_missing tests/test_scanner.py::test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elapsed tests/test_scan_end_to_end.py::test_scanner_run_succeeds_with_empty_folder_and_header_only_csv -v
 ```
 
-Result: `3 passed in 0.12s`.
+Result: `3 passed in 0.09s`.
 
-Required scanner/e2e suite after implementation:
+Required suite:
 
 ```bash
-pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v
+pytest tests/test_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -v
 ```
 
-Result: `20 passed in 0.17s`.
+Result: `32 passed in 0.24s`.
 
-Full suite after implementation:
+Full suite:
 
 ```bash
 pytest -q
 ```
 
-Result: `75 passed, 1 warning in 0.40s`.
+Result: `78 passed, 1 warning in 0.42s`.
 
 Warning: existing Starlette deprecation warning from `fastapi.testclient` importing `httpx`.
 
 ## Uncommitted changes
 
-None. Worktree is clean and the branch has been pushed to `origin/codex/obs-scan-platform`.
+At handoff-writing time, Task 4 changes are ready to commit in:
+
+- `src/obs_scan_platform/scanner.py`
+- `tests/test_aggregation.py`
+- `tests/test_scanner.py`
+- `tests/test_scan_end_to_end.py`
+- `docs/current-task.md`
+- `docs/handoff.md`
+
+The expected final state after this session is a clean worktree pushed to `origin/codex/obs-scan-platform`.
 
 ## Exact resume instructions
 
@@ -112,30 +110,28 @@ cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platfo
 2. Check branch, status, and latest commit:
 
 ```bash
-/opt/homebrew/bin/git status --short --branch
-/opt/homebrew/bin/git rev-parse HEAD
+git status --short --branch
+git rev-parse HEAD
 ```
 
-3. If any changes remain uncommitted, inspect them:
+3. Inspect any uncommitted changes before continuing:
 
 ```bash
-/opt/homebrew/bin/git diff --stat
-/opt/homebrew/bin/git diff
+git diff --stat
+git diff
 ```
 
 4. Re-run validation if needed:
 
 ```bash
-pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v
+pytest tests/test_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -v
 pytest -q
 ```
 
-5. If this session did not finish commit/push, commit and push with:
+5. If Task 4 changes remain uncommitted, commit and push:
 
 ```bash
-/opt/homebrew/bin/git add src/obs_scan_platform/scanner.py tests/test_scanner.py tests/test_scan_end_to_end.py docs/current-task.md docs/handoff.md
-/opt/homebrew/bin/git commit -m "fix: preserve parent prefix coverage"
-/opt/homebrew/bin/git add docs/handoff.md
-/opt/homebrew/bin/git commit -m "docs: record parent prefix coverage handoff"
-/opt/homebrew/bin/git push -u origin HEAD
+git add src/obs_scan_platform/scanner.py tests/test_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py docs/current-task.md docs/handoff.md
+git commit -m "fix: handle empty buckets and log bucket duration"
+git push -u origin HEAD
 ```

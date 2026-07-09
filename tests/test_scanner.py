@@ -3,6 +3,7 @@ import base64
 import csv
 import json
 import inspect
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -456,6 +457,45 @@ async def test_collect_prefixes_processes_all_prefixes_with_bounded_workers(tmp_
         rows = list(csv.DictReader((tmp_path / prefix_temp_filename(prefix)).open(newline="", encoding="utf-8")))
         assert rows == [{"object_key": f"{prefix}file.txt", "size_bytes": "5", "last_modified_ms": "2000"}]
     assert client.max_active <= 2
+
+
+@pytest.mark.asyncio
+async def test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elapsed(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    scanner, application, bucket = make_scanner()
+    client = FakeClient(
+        [
+            {"result": "http://bucket-endpoint/"},
+            {"result": {"files": [], "nextOffset": ""}},
+        ]
+    )
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        result = await scanner._scan_bucket(
+            application,
+            bucket,
+            client,
+            "run-1",
+            tmp_path,
+            scan_started_ms=1000,
+        )
+
+    assert result.status == ScanStatus.SUCCESS
+    assert result.csv_path == tmp_path / application.appid / f"{bucket.name}.csv"
+    with result.csv_path.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.reader(file))
+    assert rows[0][0:3] == ["run_id", "appid", "bucket_name"]
+    assert len(rows) == 1
+    finish_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if f"bucket finish appid={application.appid} bucket={bucket.name}" in record.getMessage()
+    ]
+    assert len(finish_messages) == 1
+    assert "status=success" in finish_messages[0]
+    assert "elapsed_seconds=" in finish_messages[0]
 
 
 def test_bucket_manifest_temp_dir_cleanup_and_retention(tmp_path: Path):

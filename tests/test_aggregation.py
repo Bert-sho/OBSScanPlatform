@@ -101,6 +101,29 @@ def test_aggregate_bucket_writes_exact_final_header(tmp_path: Path):
         assert next(csv.reader(file)) == FINAL_FIELDS
 
 
+def test_aggregate_bucket_writes_header_only_when_temp_dir_is_missing(tmp_path: Path):
+    output = tmp_path / "bucket.csv"
+
+    row_count = aggregate_bucket(
+        run_id="run-1",
+        appid="app.one",
+        bucket_name="bucket-a",
+        bucket_id="bucket-id",
+        temp_dir=tmp_path / "missing-temp",
+        output_path=output,
+        thresholds=Thresholds(
+            large_directory_bytes=20,
+            large_file_bytes=20,
+            inactive_directory_days=1,
+        ),
+        scan_started_ms=1000,
+    )
+
+    assert row_count == 0
+    with output.open(newline="", encoding="utf-8") as file:
+        assert list(csv.reader(file)) == [FINAL_FIELDS]
+
+
 def test_aggregate_bucket_writes_lowercase_bool_values(tmp_path: Path):
     temp_dir = tmp_path / "_tmp"
     append_object_rows(temp_dir / "objects.csv", [ObjectRow("file.txt", 25, 1000)])
