@@ -21,7 +21,11 @@
 
 ## Latest commit after this session
 
+`d00de9cfd65723441149266a2f12efb6068a2727` (`fix: sanitize OBS request errors`)
+`6038f97753632549b2ceb2c89c5b9ff907a9b200` (`fix: cover sanitized connection errors`)
+`7b7f172202f6e19019cdd7570e5636c31a0e0d6e` (`docs: record task 2 commits`)
 `95ed3cddf653eefccf6abf2f3869d66310a92f6a` (`fix: sanitize non-json OBS error bodies`)
+`a47f2b5d7836f7f67e4ae8b8f919c3effd033414` (`docs: update Task 2 handoff`)
 
 Treat the final branch HEAD as authoritative and verify it with `/opt/homebrew/bin/git rev-parse HEAD`.
 
