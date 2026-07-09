@@ -22,9 +22,15 @@
 
 ## Latest commit after this session
 
+Final Task 3 branch tip recorded by the prior handoff correction:
+
+`42c3c36ece8aff4ae6676c4ffcf30bef3e497d1a` (`docs: record parent prefix coverage handoff`)
+
+Task 3 code repair commit:
+
 `37b0b1d48b0ac844e4bc6f0563b2ee73992210a4` (`fix: preserve parent prefix coverage`)
 
-This docs-only correction records the repair commit above explicitly so future agents do not need chat history to identify the Task 3 coverage fix.
+This final docs-only correction keeps the handoff self-contained: `37b0b1d48b0ac844e4bc6f0563b2ee73992210a4` is the scanner/test fix, and `42c3c36ece8aff4ae6676c4ffcf30bef3e497d1a` is the handoff commit that was the pushed branch tip before this final documentation cleanup.
 
 ## Summary of what changed
 
@@ -93,15 +99,7 @@ Warning: existing Starlette deprecation warning from `fastapi.testclient` import
 
 ## Uncommitted changes
 
-The intended repair changes before commit are limited to:
-
-- `src/obs_scan_platform/scanner.py`
-- `tests/test_scanner.py`
-- `tests/test_scan_end_to_end.py`
-- `docs/current-task.md`
-- `docs/handoff.md`
-
-Generated `__pycache__` directories from test runs should be removed before commit.
+None. Worktree is clean and the branch has been pushed to `origin/codex/obs-scan-platform`.
 
 ## Exact resume instructions
 
