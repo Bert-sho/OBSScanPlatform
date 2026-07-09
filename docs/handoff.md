@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-09 18:23 CST
+2026-07-09 18:27 CST
 
 ## Machine/environment
 
@@ -22,11 +22,11 @@
 
 ## Latest commit after this session
 
-Task 6 documentation changes are pending commit at the time this handoff is written. Suggested commit message:
+Task 6 documentation delivery commit:
 
-`docs: update scan operation guidance`
+`13afcbbd8ac2f42653b809ecf14433a729d26ad6` (`docs: update scan operation guidance`)
 
-The final branch tip should be reported in the Codex final response after commit and push.
+This docs-only handoff correction follows that delivery commit. The final branch tip after this correction is reported in the Codex final response.
 
 ## Summary of what changed
 
@@ -78,12 +78,7 @@ Warning: existing Starlette deprecation warning from `fastapi.testclient` import
 
 ## Uncommitted changes
 
-Task 6 documentation changes are intentionally uncommitted while this handoff is being updated. Expected changed files before commit:
-
-- `README.md`
-- `docs/scan-start-guide.md`
-- `docs/current-task.md`
-- `docs/handoff.md`
+None. The Task 6 documentation delivery commit `13afcbbd8ac2f42653b809ecf14433a729d26ad6` has been pushed to `origin/codex/obs-scan-platform`; this handoff correction should also leave the worktree clean after commit and push.
 
 ## Exact resume instructions
 
@@ -93,27 +88,18 @@ Task 6 documentation changes are intentionally uncommitted while this handoff is
 cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
 ```
 
-2. Review status and diff:
+2. Check branch, status, and latest commit:
 
 ```bash
 /opt/homebrew/bin/git status --short --branch
-/opt/homebrew/bin/git diff --stat
-/opt/homebrew/bin/git diff
+/opt/homebrew/bin/git rev-parse HEAD
 ```
 
-3. Run validation:
+3. If you need a confidence check, run:
 
 ```bash
 pytest tests/test_scan_end_to_end.py -v
 pytest -q
 ```
 
-4. Commit and push if validation remains green:
-
-```bash
-/opt/homebrew/bin/git add README.md docs/scan-start-guide.md docs/current-task.md docs/handoff.md
-/opt/homebrew/bin/git commit -m "docs: update scan operation guidance"
-/opt/homebrew/bin/git push -u origin HEAD
-```
-
-5. Continue with final overall review and verification.
+4. Continue only if a new follow-up task is requested.
