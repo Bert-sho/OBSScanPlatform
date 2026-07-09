@@ -21,7 +21,8 @@
 
 ## Latest commit after this session
 
-`fix: cover sanitized connection errors`
+`d00de9cfd65723441149266a2f12efb6068a2727` (`fix: sanitize OBS request errors`)
+`6038f97753632549b2ceb2c89c5b9ff907a9b200` (`fix: cover sanitized connection errors`)
 
 Treat the final branch HEAD as authoritative and verify it with `/opt/homebrew/bin/git rev-parse HEAD`.
 
