@@ -8,9 +8,9 @@
 - 工作目录：`/Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform`
 - Git 命令：统一使用 `/opt/homebrew/bin/git`
 - 当前任务标题：Task 10 Final Verification and Handoff
-- 当前阶段：Task 10 收尾，正在提交并推送项目级交接文档
-- 任务状态：验证已通过，文档更新待提交和推送
-- 最新已推送任务提交：`37b9808 test: add mocked end-to-end scan validation`
+- 当前阶段：10 个任务均已实现；本次恢复用于把交接文档从“收尾中”修正为最终完成态
+- 任务状态：已完成
+- 最新已推送交接提交：`90e5c01 docs: update project handoff status`
 - 目标远端：`origin/codex/obs-scan-platform`
 
 ## 用户目标
@@ -30,7 +30,7 @@
 | Task 7 CLI Scanner | 已完成 | `402409b`, `417d284`, `cd17847` | `cli.py` scan 命令 | CLI 成功路径、失败退出码、help 暴露 scan 子命令测试通过 |
 | Task 8 FastAPI Management API | 已完成 | `9aae95e`, `d5672c0`, `cb55135`, `e576a7b` | `api.py`, API 行为与安全测试 | health、config、runs、logs、CSV 下载、POST 202/409、路径穿越、symlink 防护测试通过 |
 | Task 9 Mocked End-to-End Validation | 已完成 | `37b9808` | `tests/test_scan_end_to_end.py`, README 用法说明 | mocked OBS 扫描闭环测试通过，最终 CSV/manifest/temp 清理验证通过 |
-| Task 10 Final Verification and Handoff | 收尾中 | 本次文档提交 | `docs/current-task.md`, `docs/handoff.md` | `pytest -v`、CLI help、API import 已通过；文档提交和 push 正在执行 |
+| Task 10 Final Verification and Handoff | 已完成 | `90e5c01` | `docs/current-task.md`, `docs/handoff.md` | `pytest -v`、CLI help、API import 已通过；交接文档已提交并推送 |
 
 ## 当前验证证据
 
@@ -42,7 +42,7 @@
 | `obs-scan --help` | exit 0 | 顶层 CLI 显示 `scan` 子命令 |
 | `obs-scan scan --help` | exit 0 | 显示 `--config`, `--appid`, `--run-id` |
 | `python3 -c "from obs_scan_platform.api import app; print(app.title)"` | 输出 `OBS Scan Platform` | API app 可导入 |
-| `/opt/homebrew/bin/git status --short --branch` | 仅 `docs/current-task.md`、`docs/handoff.md` 有意修改 | 测试缓存已清理 |
+| `/opt/homebrew/bin/git status --short --branch` | 分支与 `origin/codex/obs-scan-platform` 对齐 | 本次恢复会再次提交文档状态修正 |
 
 ## 当前产品能力
 

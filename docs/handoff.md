@@ -2,20 +2,21 @@
 
 ## 环境
 
-- 更新时间：2026-07-09 08:04 CST
+- 更新时间：2026-07-09 08:04 CST；2026-07-09 后续恢复时确认 10 个任务均已完成
 - 工作目录：`/Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform`
 - 分支：`codex/obs-scan-platform`
 - 主分支：`master`
 - Git 命令：`/opt/homebrew/bin/git`
 - Python：3.11.6
 - 远端分支：`origin/codex/obs-scan-platform`
-- Latest commit before this session: `37b9808ecdf3c2eefecbbfa9c349482335432521`
-- Latest commit after this session: 本文档提交后的实际 SHA 需以 `git rev-parse HEAD` 为准，不能写入提交自身内容。
-- Uncommitted changes at handoff write time: `docs/current-task.md` 和 `docs/handoff.md` 为有意修改；测试缓存已清理，提交前需再次确认。
+- Latest commit before final handoff update: `37b9808ecdf3c2eefecbbfa9c349482335432521`
+- Latest completed handoff commit: `90e5c01f2f8a2a2cae319abddc629e2895d79627`
+- Latest commit after this resume: 本文档提交后的实际 SHA 需以 `git rev-parse HEAD` 为准，不能写入提交自身内容。
+- Uncommitted changes at final handoff completion: 无；分支已推送到 `origin/codex/obs-scan-platform`。本次恢复仅修正文档最终状态表述。
 
 ## 当前结论
 
-OBS 扫描平台第一版 10 个计划任务已经实现到收尾阶段。功能代码、测试、README 和交接文档均在 `codex/obs-scan-platform` 分支中维护；本文件所在提交用于记录项目级状态，提交后会推送到 GitHub 远端分支。
+OBS 扫描平台第一版 10 个计划任务已经完成。功能代码、测试、README 和交接文档均在 `codex/obs-scan-platform` 分支中维护；文档交接提交已经推送到 GitHub 远端分支。
 
 ## 提交时间线
 
@@ -43,6 +44,7 @@ OBS 扫描平台第一版 10 个计划任务已经实现到收尾阶段。功能
 | 20 | `cb55135 test: cover API path traversal variants` | appid/bucket_name 路径穿越回归测试、run symlink 防护 |
 | 21 | `e576a7b fix: ignore symlinked run manifests` | 忽略 symlink manifest |
 | 22 | `37b9808 test: add mocked end-to-end scan validation` | mocked OBS 端到端扫描测试、README 用法 |
+| 23 | `90e5c01 docs: update project handoff status` | 写入 10 个任务的项目级交接状态并推送 |
 
 ## 任务详情
 
@@ -115,17 +117,16 @@ OBS 扫描平台第一版 10 个计划任务已经实现到收尾阶段。功能
 
 ### Task 10: Final Verification and Handoff
 
-- 状态：验证已通过，文档更新待提交和推送。
+- 状态：已完成。
 - 已完成：
   - `pytest -v`
   - `obs-scan --help`
   - `obs-scan scan --help`
   - `python3 -c "from obs_scan_platform.api import app; print(app.title)"`
   - 更新 `docs/current-task.md` 和 `docs/handoff.md`
-- 待完成：
-  - 复查 git status。
-  - 提交本文档更新。
-  - 推送到 GitHub。
+- 提交和推送：
+  - `90e5c01 docs: update project handoff status`
+  - 已推送到 `origin/codex/obs-scan-platform`
 
 ## 验证证据
 
