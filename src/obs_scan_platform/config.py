@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ScanSettings(BaseModel):
@@ -19,34 +19,70 @@ class ScanSettings(BaseModel):
     max_retries: int = 5
     retry_base_delay_seconds: float = 2
     retry_max_delay_seconds: float = 60
+    filelist_task_limit_per_bucket: int = 100
 
 
 class Thresholds(BaseModel):
     large_directory_bytes: int
     large_file_bytes: int
     inactive_directory_days: int
+    filelist_depth: int = Field(default=5, exclude=True)
+
+
+class BucketOverrides(BaseModel):
+    large_directory_bytes: int | None = None
+    large_file_bytes: int | None = None
+    inactive_directory_days: int | None = None
+    filelist_depth: int | None = None
 
 
 class ApplicationConfig(BaseModel):
     appid: str
     name: str
-    endpoint: str
+    endpoint: str | None = None
     apptoken: str
     enabled: bool = True
-    buckets: dict[str, Thresholds] = Field(default_factory=dict)
+    scan_shared_buckets: bool = False
+    buckets: dict[str, BucketOverrides] = Field(default_factory=dict)
 
 
 class AppConfigFile(BaseModel):
+    endpoint: str | None = None
     scan: ScanSettings = Field(default_factory=ScanSettings)
     defaults: Thresholds
     applications: list[ApplicationConfig]
     source_path: Path | None = None
 
+    @model_validator(mode="after")
+    def validate_endpoint_config(self) -> "AppConfigFile":
+        if self.endpoint is not None:
+            return self
+        missing = [application.appid for application in self.applications if application.endpoint is None]
+        if missing:
+            raise ValueError("endpoint must be configured globally or for each application")
+        return self
+
     def enabled_applications(self) -> list[ApplicationConfig]:
         return [application for application in self.applications if application.enabled]
 
     def thresholds_for(self, application: ApplicationConfig, bucket_name: str) -> Thresholds:
-        return application.buckets.get(bucket_name, self.defaults)
+        override = application.buckets.get(bucket_name)
+        if override is None:
+            return self.defaults
+        values = {
+            "large_directory_bytes": self.defaults.large_directory_bytes,
+            "large_file_bytes": self.defaults.large_file_bytes,
+            "inactive_directory_days": self.defaults.inactive_directory_days,
+            "filelist_depth": self.defaults.filelist_depth,
+        }
+        values.update(override.model_dump(exclude_none=True))
+        return Thresholds.model_validate(values)
+
+    def endpoint_for(self, application: ApplicationConfig) -> str:
+        endpoint = self.endpoint or application.endpoint
+        if endpoint is None:
+            raise ValueError("endpoint must be configured globally or for the application")
+        return endpoint
 
     def masked_dict(self) -> dict[str, Any]:
         data = self.model_dump(mode="json", exclude={"source_path"})

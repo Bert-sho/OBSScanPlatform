@@ -1,3 +1,5 @@
+endpoint: http://example.com
+
 scan:
   results_dir: results
   temp_subdir: _tmp
@@ -12,20 +14,23 @@ scan:
   max_retries: 5
   retry_base_delay_seconds: 2
   retry_max_delay_seconds: 60
+  filelist_task_limit_per_bucket: 100
 
 defaults:
   large_directory_bytes: 107374182400
   large_file_bytes: 10737418240
   inactive_directory_days: 180
+  filelist_depth: 5
 
 applications:
   - appid: com.camera.pergen
     name: Example application
-    endpoint: http://example.com
     apptoken: replace-with-real-token
     enabled: true
+    scan_shared_buckets: false
     buckets:
       bucket-1191:
         large_directory_bytes: 214748364800
         large_file_bytes: 21474836480
         inactive_directory_days: 365
+        filelist_depth: 8
