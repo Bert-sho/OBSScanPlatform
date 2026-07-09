@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Task 5: filelist progress logging and CLI tqdm
+Task 6: documentation and end-to-end compatibility
 
 ## Current branch
 
@@ -14,54 +14,44 @@ Task 5: filelist progress logging and CLI tqdm
 
 ## User goal
 
-Only show concise filelist progress during scans: write per-bucket filelist completed/total progress into `scan.log`, enable `tqdm` progress bars for command-line scans, and keep FastAPI-triggered scans free of terminal progress bars.
+Keep the user-facing scan startup documentation aligned with the implemented scanner behavior: global endpoint configuration, shared bucket opt-in, bounded recursive `filelist` discovery, CLI `tqdm` progress, FastAPI non-interactive scans, filelist progress logs, bucket elapsed logs, and empty-bucket success behavior.
 
 ## Completed work
 
-- Added runtime dependency `tqdm>=4.66`.
-- Added `show_progress` to `Scanner` and `run_scan()`.
-- Updated CLI `obs-scan scan` to pass `show_progress=True`.
-- Updated FastAPI background scan to pass `show_progress=False`.
-- Added per-directory filelist progress logs with `completed` and `total`.
-- Added optional per-bucket tqdm progress bars for CLI scans only.
-- Added tests for scanner progress logging, progress-bar creation, CLI progress enablement, and API progress disablement.
+- Updated `README.md` with the recommended top-level endpoint config shape.
+- Documented `scan_shared_buckets` and per-bucket `filelist_depth` overrides.
+- Documented bounded recursive `filelist` discovery and `scan.filelist_task_limit_per_bucket`.
+- Documented CLI `tqdm` progress behavior.
+- Documented that FastAPI scans do not show progress bars and should use logs for progress.
+- Updated `docs/scan-start-guide.md` with the same operational guidance in Chinese.
+- Confirmed the current end-to-end tests already use top-level endpoint config and pass.
 
 ## Remaining work
 
-None for Task 5.
+None for Task 6.
 
 ## Key files changed
 
-- `pyproject.toml`
-- `src/obs_scan_platform/scanner.py`
-- `src/obs_scan_platform/cli.py`
-- `src/obs_scan_platform/api.py`
-- `tests/test_scanner.py`
-- `tests/test_cli.py`
-- `tests/test_api.py`
+- `README.md`
+- `docs/scan-start-guide.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
-- Red: `pytest tests/test_scanner.py::test_discover_root_logs_filelist_progress tests/test_scanner.py::test_discover_root_updates_progress_bar_when_enabled tests/test_cli.py::test_scan_success_path tests/test_api.py::test_post_runs_accepts_scan_and_resets_active_scan -v`
-- Focused green: `pytest tests/test_scanner.py::test_discover_root_logs_filelist_progress tests/test_scanner.py::test_discover_root_updates_progress_bar_when_enabled tests/test_scanner.py::test_discover_root_does_not_create_progress_bar_by_default tests/test_cli.py::test_scan_success_path tests/test_api.py::test_post_runs_accepts_scan_and_resets_active_scan -v`
-- Required green: `pytest tests/test_scanner.py tests/test_cli.py tests/test_api.py -v`
-- Full suite: `pytest -q`
+- `pytest tests/test_scan_end_to_end.py -v`
+- `pytest -q`
 
 ## Validation result
 
-- Red run failed before implementation: missing filelist progress logs, missing progress-bar hook, and CLI passed `show_progress=False`.
-- Focused green after implementation: `5 passed, 1 warning`.
-- Required green after implementation: `45 passed, 1 warning`.
-- Full suite after implementation: `81 passed, 1 warning`.
+- End-to-end scan tests: `2 passed in 0.13s`.
+- Full suite: `81 passed, 1 warning in 0.42s`.
 - Warning: existing Starlette deprecation warning from `fastapi.testclient` importing `httpx`.
 
 ## Known risks
 
-- `tqdm` is lazily imported and only covered through a monkeypatched progress-bar factory, not through real terminal rendering.
-- Filelist `total` is dynamic and capped by `filelist_task_limit_per_bucket`; logs reflect discovered scheduled tasks at the time each directory completes.
+- Documentation describes the current CLI/API behavior but does not include rendered terminal screenshots of tqdm output.
 
 ## Next recommended action
 
-Review and commit Task 5, then continue with Task 6 documentation and end-to-end compatibility.
+Run final validation, commit Task 6, then perform final overall review and verification.

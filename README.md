@@ -16,7 +16,41 @@ Copy the example configuration before running scans:
 cp config/apps.example.yaml config/apps.yaml
 ```
 
-Edit `config/apps.yaml` with real application IDs, OBS API endpoints, and app tokens. Do not commit real tokens.
+Edit `config/apps.yaml` with the real OBS API endpoint, application IDs, app tokens, bucket overrides, and scan concurrency settings. Do not commit real tokens.
+
+The recommended config shape uses one top-level OBS API endpoint:
+
+```yaml
+endpoint: http://obs.example
+```
+
+Each application can opt into shared bucket scanning:
+
+```yaml
+applications:
+  - appid: com.camera.pergen
+    name: Example application
+    apptoken: replace-with-real-token
+    scan_shared_buckets: false
+```
+
+Directory discovery uses bounded recursive `filelist` splitting. The default depth is `5`, and each bucket is capped at about `100` filelist directory tasks by `scan.filelist_task_limit_per_bucket`. A bucket can override only its filelist depth without repeating the size and inactivity thresholds:
+
+```yaml
+defaults:
+  large_directory_bytes: 107374182400
+  large_file_bytes: 10737418240
+  inactive_directory_days: 180
+  filelist_depth: 5
+
+applications:
+  - appid: com.camera.pergen
+    name: Example application
+    apptoken: replace-with-real-token
+    buckets:
+      bucket-1191:
+        filelist_depth: 8
+```
 
 ## CLI Scans
 
@@ -25,6 +59,8 @@ Run a scan for all enabled applications:
 ```bash
 obs-scan scan --config config/apps.yaml
 ```
+
+CLI scans display a `tqdm` progress bar for each bucket's `filelist` directory discovery. Detailed progress is also written to `results/<run_id>/scan.log`.
 
 Run a scan for one application ID:
 
@@ -58,6 +94,8 @@ Useful endpoints:
 
 The manual scan trigger uses an in-process `active_scan` guard. Run the API with a single worker for this version; multiple API workers do not share that guard.
 
+FastAPI-triggered scans do not show terminal progress bars. Use `GET /runs/{run_id}/logs` or read `results/<run_id>/scan.log` to view `filelist` progress and per-bucket elapsed time.
+
 ## Results
 
 By default, scan output is written under `results/<run_id>/`.
@@ -74,5 +112,9 @@ Each run also writes:
 
 - `results/<run_id>/manifest.json`
 - `results/<run_id>/scan.log`
+
+`scan.log` includes per-bucket filelist progress lines such as `filelist progress ... completed=<completed> total=<total>` and bucket duration fields such as `elapsed_seconds=...`.
+
+Empty buckets and buckets containing only empty folders still finish successfully. They produce a bucket CSV with only the final header row.
 
 Design spec: `docs/superpowers/specs/2026-07-08-obs-scan-platform-design.md`

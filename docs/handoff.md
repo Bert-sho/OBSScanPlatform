@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-09 18:17 CST
+2026-07-09 18:23 CST
 
 ## Machine/environment
 
@@ -18,75 +18,53 @@
 
 ## Latest commit before this session
 
-`44da6b78bad493b856b99a334757d0fb1182fd4a` (`docs: update task 4 handoff state`)
+`5ca45b2f3b9985e112aaee4a52dacee146ef1001` (`docs: update task 5 handoff state`)
 
 ## Latest commit after this session
 
-Task 5 code delivery commit:
+Task 6 documentation changes are pending commit at the time this handoff is written. Suggested commit message:
 
-`3af43829d2af4f3bf2c85b405b7571a5e9d5b521` (`feat: add filelist progress reporting`)
+`docs: update scan operation guidance`
 
-This docs-only handoff correction follows that code delivery commit. The final branch tip after this correction is reported in the Codex final response.
+The final branch tip should be reported in the Codex final response after commit and push.
 
 ## Summary of what changed
 
-- `pyproject.toml`
-  - Added runtime dependency `tqdm>=4.66`.
-- `src/obs_scan_platform/scanner.py`
-  - Added `show_progress` to `Scanner`.
-  - Added `show_progress` to `run_scan()`.
-  - `_discover_root()` now logs `filelist progress appid=... bucket=... completed=... total=...` after each directory filelist task completes.
-  - Filelist progress total starts at 1 for root, grows as directories are scheduled, and is capped by `filelist_task_limit_per_bucket`.
-  - Added optional per-bucket tqdm progress bars through a lazy-imported progress-bar factory.
-- `src/obs_scan_platform/cli.py`
-  - CLI `scan` now calls `run_scan(..., show_progress=True)`.
-- `src/obs_scan_platform/api.py`
-  - FastAPI background scan calls `run_scan(..., show_progress=False)`.
-- `tests/test_scanner.py`
-  - Added `caplog` coverage for filelist progress log messages.
-  - Added progress-bar coverage for enabled CLI-style scans.
-  - Added coverage that default scanner behavior does not create a progress bar.
-- `tests/test_cli.py`
-  - Updated CLI scan tests to assert `show_progress=True`.
-- `tests/test_api.py`
-  - Updated FastAPI background scan test to assert `show_progress=False`.
+- `README.md`
+  - Added recommended top-level OBS API endpoint config shape.
+  - Documented `scan_shared_buckets`.
+  - Documented default `filelist_depth=5` and `scan.filelist_task_limit_per_bucket=100`.
+  - Documented per-bucket `filelist_depth` overrides without repeating threshold values.
+  - Documented CLI `tqdm` progress and FastAPI non-interactive scan behavior.
+- `docs/scan-start-guide.md`
+  - Updated Chinese startup instructions for global endpoint config.
+  - Added shared bucket opt-in guidance.
+  - Added bounded recursive filelist guidance.
+  - Added CLI tqdm and FastAPI scan log guidance.
+  - Documented `scan.log` filelist progress and bucket elapsed logs.
+  - Documented empty bucket / empty folder success with header-only CSV.
+- `docs/current-task.md`
+  - Updated current task metadata for Task 6.
 
 ## Important decisions and rationale
 
-- Progress bars are created only when `Scanner.show_progress` is true, so FastAPI scans remain non-interactive.
-- `tqdm` is imported lazily inside `_filelist_progress_bar()` to avoid unnecessary import/output behavior on API paths.
-- Filelist progress logging is at directory-task granularity, not request granularity, preserving the requirement to avoid logging every request.
-- Dynamic progress totals are updated only when a new directory task is actually scheduled, so total does not exceed `filelist_task_limit_per_bucket`.
+- No scanner/test production behavior changed in Task 6; earlier tasks already updated E2E tests to use top-level endpoint config.
+- The startup guide remains the primary Chinese operational guide instead of adding a duplicate CLI guide.
+- The docs explain that CLI progress bars are terminal-only while FastAPI users should read `scan.log` or `/runs/{run_id}/logs`.
 
 ## Failed attempts or rejected approaches
 
-- Initial red run failed before implementation:
-
-```bash
-pytest tests/test_scanner.py::test_discover_root_logs_filelist_progress tests/test_scanner.py::test_discover_root_updates_progress_bar_when_enabled tests/test_cli.py::test_scan_success_path tests/test_api.py::test_post_runs_accepts_scan_and_resets_active_scan -v
-```
-
-Result: 3 failed and 1 passed. Failures proved there were no progress logs, no progress-bar hook, and CLI did not pass `show_progress=True`.
-
-- First implementation called the progress-bar factory even when `show_progress=False`, and the test caught that. The scanner now only calls `_filelist_progress_bar()` when `self.show_progress` is true.
+- No failed code attempt in Task 6. This was a documentation synchronization task.
 
 ## Current test/build status
 
-Focused green:
+End-to-end scan tests:
 
 ```bash
-pytest tests/test_scanner.py::test_discover_root_logs_filelist_progress tests/test_scanner.py::test_discover_root_updates_progress_bar_when_enabled tests/test_scanner.py::test_discover_root_does_not_create_progress_bar_by_default tests/test_cli.py::test_scan_success_path tests/test_api.py::test_post_runs_accepts_scan_and_resets_active_scan -v
+pytest tests/test_scan_end_to_end.py -v
 ```
 
-Result: `5 passed, 1 warning`.
-
-Required suite:
-
-```bash
-pytest tests/test_scanner.py tests/test_cli.py tests/test_api.py -v
-```
-
-Result: `45 passed, 1 warning`.
+Result: `2 passed in 0.13s`.
 
 Full suite:
 
@@ -94,13 +72,18 @@ Full suite:
 pytest -q
 ```
 
-Result: `81 passed, 1 warning`.
+Result: `81 passed, 1 warning in 0.42s`.
 
 Warning: existing Starlette deprecation warning from `fastapi.testclient` importing `httpx`.
 
 ## Uncommitted changes
 
-None. The Task 5 code delivery commit `3af43829d2af4f3bf2c85b405b7571a5e9d5b521` has been pushed to `origin/codex/obs-scan-platform`; this handoff correction should also leave the worktree clean after commit and push.
+Task 6 documentation changes are intentionally uncommitted while this handoff is being updated. Expected changed files before commit:
+
+- `README.md`
+- `docs/scan-start-guide.md`
+- `docs/current-task.md`
+- `docs/handoff.md`
 
 ## Exact resume instructions
 
@@ -110,18 +93,27 @@ None. The Task 5 code delivery commit `3af43829d2af4f3bf2c85b405b7571a5e9d5b521`
 cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
 ```
 
-2. Check branch, status, and latest commit:
+2. Review status and diff:
 
 ```bash
 /opt/homebrew/bin/git status --short --branch
-/opt/homebrew/bin/git rev-parse HEAD
+/opt/homebrew/bin/git diff --stat
+/opt/homebrew/bin/git diff
 ```
 
-3. If you need a confidence check before Task 6, run:
+3. Run validation:
 
 ```bash
-pytest tests/test_scanner.py tests/test_cli.py tests/test_api.py -v
+pytest tests/test_scan_end_to_end.py -v
 pytest -q
 ```
 
-4. Continue with Task 6 documentation and end-to-end compatibility.
+4. Commit and push if validation remains green:
+
+```bash
+/opt/homebrew/bin/git add README.md docs/scan-start-guide.md docs/current-task.md docs/handoff.md
+/opt/homebrew/bin/git commit -m "docs: update scan operation guidance"
+/opt/homebrew/bin/git push -u origin HEAD
+```
+
+5. Continue with final overall review and verification.

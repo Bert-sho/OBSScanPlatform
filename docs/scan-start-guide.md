@@ -16,7 +16,41 @@ python -m pip install -e ".[dev]"
 cp config/apps.example.yaml config/apps.yaml
 ```
 
-编辑 `config/apps.yaml`，填写真实的应用 `appid`、OBS API `endpoint`、`apptoken`、桶级阈值和扫描并发配置。不要提交真实 token。
+编辑 `config/apps.yaml`，填写真实的全局 OBS API `endpoint`、应用 `appid`、`apptoken`、桶级覆盖参数和扫描并发配置。不要提交真实 token。
+
+推荐只在 YAML 顶层配置一次 OBS API endpoint：
+
+```yaml
+endpoint: http://obs.example
+```
+
+每个应用默认不扫描共享桶，如需纳入共享桶可显式开启：
+
+```yaml
+applications:
+  - appid: com.camera.pergen
+    name: Example application
+    apptoken: replace-with-real-token
+    scan_shared_buckets: false
+```
+
+目录发现使用递归 `filelist` 拆分。默认 `filelist_depth` 为 `5`，每个桶的 filelist 目录任务数由 `scan.filelist_task_limit_per_bucket` 控制，默认约 `100` 个任务。桶可以只覆盖自己的 filelist 深度，不需要重复配置三个阈值：
+
+```yaml
+defaults:
+  large_directory_bytes: 107374182400
+  large_file_bytes: 10737418240
+  inactive_directory_days: 180
+  filelist_depth: 5
+
+applications:
+  - appid: com.camera.pergen
+    name: Example application
+    apptoken: replace-with-real-token
+    buckets:
+      bucket-1191:
+        filelist_depth: 8
+```
 
 扫描结果默认写入：
 
@@ -45,6 +79,8 @@ scan finished: success run_id=20260709T010203Z
 ```
 
 如果扫描状态不是 `success`，命令会以非 0 退出码结束。
+
+命令行扫描会为每个桶的 `filelist` 目录发现显示 `tqdm` 进度条。进度条只展示目录任务进度，不会打印每个 OBS 请求。
 
 ### 只扫描一个应用
 
@@ -133,6 +169,8 @@ curl -X POST http://127.0.0.1:8000/runs
 
 注意：当前 FastAPI 启动扫描时会按配置文件扫描所有启用应用；接口暂不支持传入 `appid` 或 `run_id`。需要按应用或固定 run_id 扫描时，请使用命令行方式。
 
+FastAPI 启动扫描时不会显示 `tqdm` 进度条。请通过 `results/<run_id>/scan.log` 或 `/runs/<run_id>/logs` 查看 filelist 进度和每个桶的总扫描耗时。
+
 ### 查看扫描运行列表
 
 ```bash
@@ -176,10 +214,12 @@ curl -o owned-bucket.csv \
 每次扫描会生成：
 
 - `results/<run_id>/manifest.json`：本次扫描的应用、桶、状态和 CSV 路径。
-- `results/<run_id>/scan.log`：扫描日志。
+- `results/<run_id>/scan.log`：扫描日志，包含每个桶的 `filelist progress ... completed=<已完成任务数> total=<总任务数>` 和桶级 `elapsed_seconds`。
 - `results/<run_id>/<appid>/<bucket>.csv`：每个桶一个目录级汇总 CSV。
 
 最终桶 CSV 只保存目录汇总信息，不保存完整文件清单。对象级临时 CSV 在扫描过程中写入 `results/<run_id>/_tmp/`，当 `scan.keep_temp_files` 为 `false` 且桶扫描成功时会自动清理。
+
+如果桶为空，或桶内只有空文件夹，扫描仍会成功，并生成只有表头的桶 CSV。
 
 ## 常见问题
 
