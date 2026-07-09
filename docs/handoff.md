@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-09 13:34 CST
+2026-07-09 13:38 CST
 
 ## Machine/environment
 
@@ -18,49 +18,58 @@
 
 ## Latest commit before this session
 
-`4a404aa355f599ad874c2e94ab21cbbe0b077730` (`feat: discover prefixes with bounded filelist recursion`)
+`67a3d4de83e3128738bb5a3adb5c52a834d359fa` (`fix: avoid overlapping prefix object scans`)
 
 ## Latest commit after this session
 
-This repair is committed as `fix: avoid overlapping prefix object scans` on `codex/obs-scan-platform`. The exact commit hash is reported in the final Codex response after commit creation and is available with `git rev-parse HEAD`.
+Pending repair commit hash. This section will be updated by a follow-up docs-only correction after `fix: preserve parent prefix coverage` is committed, because a commit cannot contain its own hash in a tracked file.
 
 ## Summary of what changed
 
-This session supplements the previous Task 3 implementation commit `4a404aa355f599ad874c2e94ab21cbbe0b077730`.
+This session supplements Task 3 commits `4a404aa355f599ad874c2e94ab21cbbe0b077730` and `67a3d4de83e3128738bb5a3adb5c52a834d359fa`.
 
 - `src/obs_scan_platform/scanner.py`
-  - `_discover_root()` now tracks `discovered_prefixes` separately from `parent_prefixes`.
-  - When filelist discovers a child directory while scanning a non-root directory, that scanned directory is marked as a parent prefix.
-  - Final `RootDiscovery.prefixes` is `discovered_prefixes - parent_prefixes`, sorted for stable tests.
-  - Root files still populate `root_files`.
-  - Non-root object entries seen during filelist discovery are still ignored.
-  - Leaf directories and depth/task-limit boundary directories remain final objectkeys scan prefixes.
+  - Replaced boundary-only final prefix selection with top-level discovered prefix selection.
+  - `_discover_root()` still discovers directories recursively according to depth/task limits.
+  - Final `RootDiscovery.prefixes` now keeps ancestor prefixes such as `alpha/` and omits covered descendants such as `alpha/beta/`.
+  - Root files still populate `root_files`; non-root filelist objects are still not individually added.
 - `tests/test_scanner.py`
-  - Updated the depth-2 recursive discovery regression so final prefixes are `["alpha/beta/"]`, not `["alpha/", "alpha/beta/"]`.
-  - Updated the task-limit regression so final prefixes are `["alpha/beta/", "bravo/"]`, keeping unexpanded boundary directories while excluding expanded parent `alpha/`.
+  - Updated recursive depth and task-limit expectations to require parent prefix coverage.
+- `tests/test_scan_end_to_end.py`
+  - Added a mocked parent direct file plus child directory case.
+  - Asserted the objectkeys API is called only for `/alpha/`.
+  - Asserted final aggregation includes `/alpha/` direct coverage and one `/alpha/beta/` child object without duplicate counting.
 
 ## Important decisions and rationale
 
-- The review finding was valid: objectkeys prefix scans are recursive, so returning both `alpha/` and `alpha/beta/` can double-collect and double-count `alpha/beta/*`.
-- The fix keeps `RootDiscovery(prefixes, root_files)` unchanged and avoids new collection modes.
-- The implementation uses the requested simpler boundary-prefix approach rather than adding a direct-files-only objectkeys mode for expanded parent directories.
+- Chose option A from the review: keep parent prefixes and remove child prefixes already covered by recursive objectkeys scans.
+- This is the smallest reliable correctness fix because objectkeys scans are recursive.
+- Option B was rejected for this task because collecting non-root direct file metadata/temp CSV rows would add a second collection path and more risk.
 - `config.py` was not modified.
 
 ## Failed attempts or rejected approaches
 
-- The red regression run before implementation failed with both selected tests showing `alpha/` still present in final prefixes.
-- An initial implementation idea of subtracting every actually expanded directory from final prefixes was too broad: it removed expanded leaf directories and caused existing scanner/E2E tests to lose all objectkeys scan prefixes. That approach was rejected before commit.
-- The committed fix subtracts only parent directories with discovered child directory prefixes.
+- Red run before implementation failed with `alpha/beta/` returned instead of `alpha/`.
+- The previous fix `67a3d4de83e3128738bb5a3adb5c52a834d359fa` avoided duplicate child scans but could drop direct files in expanded parent directories.
+- Option B was rejected as broader than necessary.
 
 ## Current test/build status
 
 Red run before implementation:
 
 ```bash
-pytest tests/test_scanner.py -k 'discover_root_recurses_to_filelist_depth or discover_root_limits_recursive_filelist_tasks' -v
+pytest tests/test_scanner.py::test_discover_root_recurses_to_filelist_depth_and_finds_nested_prefixes tests/test_scanner.py::test_discover_root_limits_recursive_filelist_tasks_but_keeps_discovered_prefixes tests/test_scan_end_to_end.py::test_scanner_run_completes_with_mocked_obs_and_directory_csv -v
 ```
 
-Result: `2 failed, 17 deselected in 0.14s`. Both failures showed `alpha/` was incorrectly returned as a final prefix.
+Result: 3 failed. Unit tests showed `alpha/beta/` was returned instead of `alpha/`; E2E failed while current discovery tried to filelist `/alpha/beta/` and did not preserve parent prefix coverage.
+
+Focused green after implementation:
+
+```bash
+pytest tests/test_scanner.py::test_discover_root_recurses_to_filelist_depth_and_finds_nested_prefixes tests/test_scanner.py::test_discover_root_limits_recursive_filelist_tasks_but_keeps_discovered_prefixes tests/test_scan_end_to_end.py::test_scanner_run_completes_with_mocked_obs_and_directory_csv -v
+```
+
+Result: `3 passed in 0.12s`.
 
 Required scanner/e2e suite after implementation:
 
@@ -68,7 +77,7 @@ Required scanner/e2e suite after implementation:
 pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v
 ```
 
-Result: `20 passed in 0.16s`.
+Result: `20 passed in 0.17s`.
 
 Full suite after implementation:
 
@@ -82,10 +91,11 @@ Warning: existing Starlette deprecation warning from `fastapi.testclient` import
 
 ## Uncommitted changes
 
-The intended repair changes before commit were limited to:
+The intended repair changes before commit are limited to:
 
 - `src/obs_scan_platform/scanner.py`
 - `tests/test_scanner.py`
+- `tests/test_scan_end_to_end.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
@@ -123,7 +133,7 @@ pytest -q
 5. If this session did not finish commit/push, commit and push with:
 
 ```bash
-/opt/homebrew/bin/git add src/obs_scan_platform/scanner.py tests/test_scanner.py docs/current-task.md docs/handoff.md
-/opt/homebrew/bin/git commit -m "fix: avoid overlapping prefix object scans"
+/opt/homebrew/bin/git add src/obs_scan_platform/scanner.py tests/test_scanner.py tests/test_scan_end_to_end.py docs/current-task.md docs/handoff.md
+/opt/homebrew/bin/git commit -m "fix: preserve parent prefix coverage"
 /opt/homebrew/bin/git push -u origin HEAD
 ```

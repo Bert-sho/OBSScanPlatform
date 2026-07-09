@@ -77,8 +77,18 @@ class FakeOBSClient:
         if url.endswith("/rest/s3/bucket/filelist"):
             request_body = _decode_base64_json(params["requestbody"])
             assert request_body["id"] == "owned-id"
-            if request_body["path"] == "/alpha/":
+            if request_body["path"] == "/alpha/beta/":
                 return {"result": {"files": [], "nextOffset": ""}}
+            if request_body["path"] == "/alpha/":
+                return {
+                    "result": {
+                        "files": [
+                            {"objectType": "folder", "objectKey": "alpha/beta/"},
+                            {"objectType": "object", "objectKey": "alpha/direct.txt"},
+                        ],
+                        "nextOffset": "",
+                    }
+                }
             assert request_body["path"] == "/"
             return {
                 "result": {
@@ -111,8 +121,8 @@ class FakeOBSClient:
             return {
                 "result": {
                     "objectkeys": [
-                        {"objectKey": "alpha/one.txt", "size": "5", "lastModifyTime": "2000"},
-                        {"objectKey": "alpha/two.txt", "size": "7", "lastModifyTime": "3000"},
+                        {"objectKey": "alpha/direct.txt", "size": "5", "lastModifyTime": "2000"},
+                        {"objectKey": "alpha/beta/child.txt", "size": "7", "lastModifyTime": "3000"},
                     ],
                     "truncated": "false",
                 }
@@ -160,6 +170,8 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
     assert any(url.endswith("/rest/boto3/s3/list/bucket/objectkeys") for url in called_urls)
     assert any(url.startswith("https://global-obs-api.example/") for url in called_urls)
     assert all(call["params"].get("bucketid") != "shared-bucket" for call in fake_client.calls)
+    objectkey_calls = [call for call in fake_client.calls if call["url"].endswith("/rest/boto3/s3/list/bucket/objectkeys")]
+    assert [_decode_base64_text(call["params"]["objectkey"]) for call in objectkey_calls] == ["/alpha/"]
 
     csv_path = tmp_path / "results" / "run-1" / "app.one" / "owned-bucket.csv"
     assert manifest["status"] == "success"
@@ -181,17 +193,19 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
     assert csv_path.exists()
 
     rows = {row["directory_path"]: row for row in csv.DictReader(csv_path.open(newline="", encoding="utf-8"))}
-    assert sorted(rows) == ["/", "/alpha/"]
+    assert sorted(rows) == ["/", "/alpha/", "/alpha/beta/"]
     assert rows["/"]["object_count"] == "3"
     assert rows["/"]["total_size_bytes"] == "24"
     assert rows["/"]["max_file_size_bytes"] == "12"
     assert rows["/alpha/"]["object_count"] == "2"
     assert rows["/alpha/"]["total_size_bytes"] == "12"
+    assert rows["/alpha/beta/"]["object_count"] == "1"
+    assert rows["/alpha/beta/"]["total_size_bytes"] == "7"
 
     csv_text = csv_path.read_text(encoding="utf-8")
     assert "object_key" not in csv_text
     assert "root.txt" not in csv_text
-    assert "alpha/one.txt" not in csv_text
+    assert "alpha/direct.txt" not in csv_text
     assert not (tmp_path / "results" / "run-1" / "_tmp" / "app.one" / "owned-bucket").exists()
 
     manifest_path = tmp_path / "results" / "run-1" / "manifest.json"
