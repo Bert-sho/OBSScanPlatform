@@ -22,7 +22,11 @@
 
 ## Latest commit after this session
 
-To be filled by `git rev-parse HEAD` after committing this handoff.
+Scanner task delivery commit:
+
+`c3797168cba5389c35d667574c0ea34804c71556` (`feat: use global endpoint and shared bucket switch`)
+
+This handoff file is being corrected by a later docs-only commit. The scanner implementation remains in `c3797168cba5389c35d667574c0ea34804c71556`; the branch tip after the docs-only correction is the commit that contains this updated handoff and is reported by `git rev-parse HEAD`.
 
 ## Summary of what changed
 
@@ -96,15 +100,9 @@ Warning: existing Starlette deprecation warning from `fastapi.testclient` import
 
 ## Uncommitted changes
 
-Before commit, expected changes are:
+None at the end of the scanner task. The scanner task commit `c3797168cba5389c35d667574c0ea34804c71556` was pushed to `origin/codex/obs-scan-platform`.
 
-- `src/obs_scan_platform/scanner.py`
-- `tests/test_scanner.py`
-- `tests/test_scan_end_to_end.py`
-- `docs/current-task.md`
-- `docs/handoff.md`
-
-No secrets or generated dependency folders should be committed. Test-generated `__pycache__` directories were removed from the working tree before staging.
+This docs-only handoff correction should also leave the worktree clean after commit and push.
 
 ## Exact resume instructions
 
@@ -121,7 +119,7 @@ git status --short --branch
 git rev-parse HEAD
 ```
 
-3. If this session did not finish committing, inspect the diff:
+3. If this docs-only correction did not finish committing, inspect the diff:
 
 ```bash
 git diff --stat
@@ -135,11 +133,11 @@ pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v
 pytest -q
 ```
 
-5. Commit with:
+5. Commit any remaining docs-only handoff correction with:
 
 ```bash
-git add src/obs_scan_platform/scanner.py tests/test_scanner.py tests/test_scan_end_to_end.py docs/current-task.md docs/handoff.md
-git commit -m "feat: use global endpoint and shared bucket switch"
+git add docs/handoff.md
+git commit -m "docs: update handoff after scanner task"
 ```
 
 6. Push with:
