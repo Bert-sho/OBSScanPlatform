@@ -21,7 +21,7 @@
 
 ## Latest commit after this session
 
-Pending the Task 1 commit created in this session.
+`3ac8dc7c01f083756ba5105a17a702fdbfc44c65` (Task 1 implementation) and the review-fix commit created in this session
 
 ## Summary of what changed
 
@@ -52,7 +52,7 @@ Pending the Task 1 commit created in this session.
 
 ## Uncommitted changes
 
-- Task 1 source, docs, and report files are modified and ready to commit.
+- None expected after this review-fix commit.
 
 ## Exact resume instructions
 
@@ -75,4 +75,4 @@ git rev-parse HEAD
 .superpowers/sdd/task-1-report.md
 ```
 
-4. Continue with the next approved task only after Task 1 is committed and pushed.
+4. Continue with Task 2 after Task 1 review passes.

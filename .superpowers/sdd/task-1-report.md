@@ -83,3 +83,11 @@ Observed result after implementation:
 
 - The new resolver centralizes a small policy decision. Future scan phases should use it instead of duplicating per-bucket concurrency logic.
 - The full suite warning is pre-existing and not caused by this work.
+
+## Review fix
+
+- Review finding summary: `docs/current-task.md` and `docs/handoff.md` still described Task 1 as if it were waiting to be committed, even though commit `3ac8dc7c01f083756ba5105a17a702fdbfc44c65` already existed and had been pushed.
+- Files changed: `docs/current-task.md`, `docs/handoff.md`
+- Validation commands and result:
+  - `/opt/homebrew/bin/git diff --check` -> passed
+  - `rg -n "Pending the Task 1 commit|ready to commit|Commit and push the Task 1 changes" docs/current-task.md docs/handoff.md` -> no matches

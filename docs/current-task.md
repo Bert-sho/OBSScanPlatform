@@ -44,7 +44,6 @@ Implement the Task 1 config changes for the OBS scan platform:
 - `config/apps.example.yaml`
 - `docs/scan-start-guide.md`
 - `docs/handoff.md`
-- `.superpowers/sdd/task-1-report.md`
 
 ## Validation commands run
 
@@ -65,4 +64,4 @@ Implement the Task 1 config changes for the OBS scan platform:
 
 ## Next recommended action
 
-- Commit and push the Task 1 changes, then pick up the next approved task in the plan.
+- Continue with Task 2 from `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md` after the Task 1 review is clean.
