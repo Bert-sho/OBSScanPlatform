@@ -8,7 +8,14 @@ import pytest
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds
 from obs_scan_platform.models import BucketInfo, BucketScanResult, ScanStatus
 from obs_scan_platform.paths import prefix_temp_filename
-from obs_scan_platform.scanner import Scanner, _rollup_status, is_owned_bucket, parse_int_or_none, run_scan
+from obs_scan_platform.scanner import (
+    Scanner,
+    _rollup_status,
+    is_owned_bucket,
+    parse_int_or_none,
+    run_scan,
+    should_scan_bucket,
+)
 
 
 class FakeClient:
@@ -54,10 +61,11 @@ def make_scanner() -> tuple[Scanner, ApplicationConfig, BucketInfo]:
     application = ApplicationConfig(
         appid="app.one",
         name="App One",
-        endpoint="http://obs.example",
+        endpoint="http://app-obs.example",
         apptoken="token-1",
     )
     config = AppConfigFile(
+        endpoint="http://global-obs.example",
         defaults=Thresholds(
             large_directory_bytes=100,
             large_file_bytes=10,
@@ -83,6 +91,18 @@ def test_is_owned_bucket_excludes_shared_bucket():
     assert not is_owned_bucket(BucketInfo("3", "c", "HEC", "cn-east-3", "reader", None))
 
 
+def test_should_scan_bucket_includes_owned_and_optional_shared_buckets():
+    owned = BucketInfo("1", "a", "HEC", "cn-east-3", "owner", None)
+    shared = BucketInfo("2", "b", "HEC", "cn-east-3", "owner", "other")
+    reader = BucketInfo("3", "c", "HEC", "cn-east-3", "reader", None)
+
+    assert should_scan_bucket(owned, include_shared=False)
+    assert should_scan_bucket(owned, include_shared=True)
+    assert not should_scan_bucket(shared, include_shared=False)
+    assert should_scan_bucket(shared, include_shared=True)
+    assert not should_scan_bucket(reader, include_shared=True)
+
+
 def test_parse_int_or_none_handles_dirty_values():
     assert parse_int_or_none("123") == 123
     assert parse_int_or_none(456) == 456
@@ -103,9 +123,55 @@ async def test_get_bucket_endpoint_uses_bucket_name_as_bucketid_and_id_as_bucket
 
     assert endpoint == "http://bucket-endpoint"
     call = client.calls[0]
+    assert call["url"].startswith("http://global-obs.example/")
     assert call["url"].endswith("/rest/s3/bucket/endpoint")
     assert call["params"]["bucketid"] == bucket.name
     assert call["params"]["bucketUid"] == bucket.bucket_id
+
+
+@pytest.mark.asyncio
+async def test_list_buckets_uses_global_endpoint_and_includes_shared_when_enabled():
+    scanner, application, _ = make_scanner()
+    application.scan_shared_buckets = True
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "buckets": [
+                        {
+                            "id": "owned-id",
+                            "name": "owned-bucket",
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "owner",
+                            "shareFrom": None,
+                        },
+                        {
+                            "id": "shared-id",
+                            "name": "shared-bucket",
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "owner",
+                            "shareFrom": "other-app",
+                        },
+                        {
+                            "id": "reader-id",
+                            "name": "reader-bucket",
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "reader",
+                            "shareFrom": None,
+                        },
+                    ]
+                }
+            }
+        ]
+    )
+
+    buckets = await scanner._list_buckets(application, client)
+
+    assert [bucket.name for bucket in buckets] == ["owned-bucket", "shared-bucket"]
+    assert client.calls[0]["url"].startswith("http://global-obs.example/")
 
 
 @pytest.mark.asyncio
@@ -127,6 +193,7 @@ async def test_discover_root_uses_bucket_filelist_and_parses_first_level_items()
     discovery = await scanner._discover_root(application, bucket, client)
 
     call = client.calls[0]
+    assert call["url"].startswith("http://global-obs.example/")
     assert call["url"].endswith("/rest/s3/bucket/filelist")
     assert discovery.prefixes == ["alpha/"]
     assert discovery.root_files == ["root.txt"]

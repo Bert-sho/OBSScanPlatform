@@ -35,6 +35,12 @@ def is_owned_bucket(bucket: BucketInfo) -> bool:
     return bucket.auth == "owner" and bucket.share_from is None
 
 
+def should_scan_bucket(bucket: BucketInfo, include_shared: bool) -> bool:
+    if bucket.auth != "owner":
+        return False
+    return bucket.share_from is None or include_shared
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -141,7 +147,7 @@ class Scanner:
                 retry_max_delay_seconds=self.config.scan.retry_max_delay_seconds,
             )
             try:
-                buckets = await self._list_owned_buckets(application, client)
+                buckets = await self._list_buckets(application, client)
                 bucket_semaphore = asyncio.Semaphore(self.config.scan.bucket_concurrency)
 
                 async def scan_bucket_with_limit(bucket: BucketInfo) -> BucketScanResult:
@@ -174,9 +180,9 @@ class Scanner:
             ],
         }
 
-    async def _list_owned_buckets(self, application: ApplicationConfig, client: OBSClient) -> list[BucketInfo]:
+    async def _list_buckets(self, application: ApplicationConfig, client: OBSClient) -> list[BucketInfo]:
         data = await client.get_json(
-            _endpoint(application.endpoint, "/rest/s3/listbuckets"),
+            _endpoint(self.config.endpoint_for(application), "/rest/s3/listbuckets"),
             params={"appid": application.appid},
             headers={**JSON_HEADERS, "csb-token": application.apptoken},
         )
@@ -190,9 +196,12 @@ class Scanner:
                 auth=item.get("auth"),
                 share_from=item.get("shareFrom"),
             )
-            if is_owned_bucket(bucket):
+            if should_scan_bucket(bucket, application.scan_shared_buckets):
                 buckets.append(bucket)
         return buckets
+
+    async def _list_owned_buckets(self, application: ApplicationConfig, client: OBSClient) -> list[BucketInfo]:
+        return await self._list_buckets(application, client)
 
     async def _scan_bucket(
         self,
@@ -251,7 +260,7 @@ class Scanner:
         client: OBSClient,
     ) -> str:
         data = await client.get_json(
-            _endpoint(application.endpoint, "/rest/s3/bucket/endpoint"),
+            _endpoint(self.config.endpoint_for(application), "/rest/s3/bucket/endpoint"),
             params={
                 "bucketid": bucket.name,
                 "token": application.apptoken,
@@ -275,7 +284,7 @@ class Scanner:
         prefixes: set[str] = set()
         root_files: list[str] = []
         pointer = ""
-        url = _endpoint(application.endpoint, "/rest/s3/bucket/filelist")
+        url = _endpoint(self.config.endpoint_for(application), "/rest/s3/bucket/filelist")
 
         while True:
             request_body = encode_request_body(

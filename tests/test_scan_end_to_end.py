@@ -126,6 +126,7 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
     monkeypatch.setattr("obs_scan_platform.scanner.OBSClient", FakeOBSClient)
 
     config = AppConfigFile(
+        endpoint="https://global-obs-api.example",
         defaults=Thresholds(
             large_directory_bytes=10,
             large_file_bytes=10,
@@ -135,7 +136,6 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
             ApplicationConfig(
                 appid="app.one",
                 name="App One",
-                endpoint="https://obs-api.example",
                 apptoken="token-1",
             )
         ],
@@ -156,6 +156,7 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
     assert any(url.endswith("/rest/s3/bucket/filelist") for url in called_urls)
     assert any(url.endswith("/rest/boto3/s3/object/metadata") for url in called_urls)
     assert any(url.endswith("/rest/boto3/s3/list/bucket/objectkeys") for url in called_urls)
+    assert any(url.startswith("https://global-obs-api.example/") for url in called_urls)
     assert all(call["params"].get("bucketid") != "shared-bucket" for call in fake_client.calls)
 
     csv_path = tmp_path / "results" / "run-1" / "app.one" / "owned-bucket.csv"
@@ -170,6 +171,7 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
                 "large_directory_bytes": 10,
                 "large_file_bytes": 10,
                 "inactive_directory_days": 30,
+                "filelist_depth": 5,
             },
             "error": None,
         }
