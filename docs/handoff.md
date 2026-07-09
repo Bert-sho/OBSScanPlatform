@@ -21,8 +21,7 @@
 
 ## Latest commit after this session
 
-`d00de9cfd65723441149266a2f12efb6068a2727` (`fix: sanitize OBS request errors`)
-`6038f97753632549b2ceb2c89c5b9ff907a9b200` (`fix: cover sanitized connection errors`)
+`95ed3cddf653eefccf6abf2f3869d66310a92f6a` (`fix: sanitize non-json OBS error bodies`)
 
 Treat the final branch HEAD as authoritative and verify it with `/opt/homebrew/bin/git rev-parse HEAD`.
 
@@ -30,8 +29,9 @@ Treat the final branch HEAD as authoritative and verify it with `/opt/homebrew/b
 
 - Added OBS client regression tests for sanitized 404, 503-after-retry, and `success=false` errors, and updated the old 404 test to expect `OBSRequestError`.
 - Added a focused connect-error sanitization regression test that proves raw URLs, query strings, encoded bodies, and tokens stay out of the final error string while the reason falls back to `ConnectError`.
+- Added a non-JSON error-body regression test that proves upstream text/HTML failures are reduced to `Service Unavailable` instead of echoing the raw body or embedded request details.
 - Reworked `OBSRequestError` to carry `endpoint`, `status_code`, and `reason` and format a sanitized failure message.
-- Sanitized HTTP and JSON failure reasons so raw URLs, query strings, encoded bodies, and tokens are not included in default error strings.
+- Sanitized HTTP and JSON failure reasons so raw URLs, query strings, encoded bodies, and tokens are not included in default error strings, and non-JSON failures now fall back to `response.reason_phrase` or `HTTP {status_code}`.
 - Preserved retry behavior: HTTP 4xx fail fast; HTTP 5xx and OBS `success=false` continue retrying through `max_retries`.
 - Passed endpoint labels from scanner OBS call sites and updated fake test clients in scanner-oriented tests.
 - Updated `docs/current-task.md`, `docs/handoff.md`, and the Task 2 report for the review-fix pass.
@@ -57,6 +57,7 @@ Treat the final branch HEAD as authoritative and verify it with `/opt/homebrew/b
 - `pytest tests/test_scan_end_to_end.py -v`: 2 passed
 - Review-fix regression coverage is already green with the current production code; no production change was required for the new connect-error sanitization test.
 - `pytest tests/test_obs_client.py -v`: 11 passed
+- `pytest tests/test_obs_client.py -v`: 12 passed
 - `/opt/homebrew/bin/git diff --check`: clean
 - `rg -n "Pending|ready to commit|needs to be written" docs/handoff.md`: no matches
 
