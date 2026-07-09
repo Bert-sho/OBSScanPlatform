@@ -259,7 +259,7 @@ async def test_discover_root_recurses_to_filelist_depth_and_finds_nested_prefixe
     discovery = await scanner._discover_root(application, bucket, client)
 
     assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/"]
-    assert discovery.prefixes == ["alpha/", "alpha/beta/"]
+    assert discovery.prefixes == ["alpha/beta/"]
     assert discovery.root_files == ["root.txt"]
 
 
@@ -293,7 +293,7 @@ async def test_discover_root_limits_recursive_filelist_tasks_but_keeps_discovere
     discovery = await scanner._discover_root(application, bucket, client)
 
     assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/"]
-    assert discovery.prefixes == ["alpha/", "alpha/beta/", "bravo/"]
+    assert discovery.prefixes == ["alpha/beta/", "bravo/"]
     assert discovery.root_files == []
 
 

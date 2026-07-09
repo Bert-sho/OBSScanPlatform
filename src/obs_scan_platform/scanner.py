@@ -285,7 +285,8 @@ class Scanner:
         thresholds = thresholds or self.config.thresholds_for(application, bucket.name)
         max_depth = max(1, thresholds.filelist_depth)
         task_limit = max(1, self.config.scan.filelist_task_limit_per_bucket)
-        prefixes: set[str] = set()
+        discovered_prefixes: set[str] = set()
+        parent_prefixes: set[str] = set()
         root_files: list[str] = []
         url = _endpoint(self.config.endpoint_for(application), "/rest/s3/bucket/filelist")
         queue: list[tuple[str, int]] = [("/", 1)]
@@ -320,7 +321,9 @@ class Scanner:
                     if object_type == "folder":
                         prefix = self._filelist_folder_prefix(path, object_key or item.get("name"))
                         if prefix:
-                            prefixes.add(prefix)
+                            discovered_prefixes.add(prefix)
+                            if path != "/":
+                                parent_prefixes.add(path.strip("/").rstrip("/") + "/")
                             if depth < max_depth and prefix not in scanned_paths:
                                 queue.append(("/" + prefix, depth + 1))
                     elif path == "/" and object_key:
@@ -333,7 +336,7 @@ class Scanner:
                     break
                 pointer = next_pointer
 
-        return RootDiscovery(prefixes=sorted(prefixes), root_files=root_files)
+        return RootDiscovery(prefixes=sorted(discovered_prefixes - parent_prefixes), root_files=root_files)
 
     def _filelist_folder_prefix(self, path: str, value: Any) -> str:
         raw_prefix = str(value or "").strip("/")

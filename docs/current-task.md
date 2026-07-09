@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Task 3 recursive filelist directory discovery
+Task 3 review fix: avoid overlapping prefix object scans
 
 ## Current branch
 
@@ -14,54 +14,48 @@ Task 3 recursive filelist directory discovery
 
 ## User goal
 
-Use the OBS filelist API recursively per bucket, with recursion depth coming from `thresholds.filelist_depth`, while bounding directory filelist calls with `scan.filelist_task_limit_per_bucket`. Keep root files as metadata targets and discovered directory prefixes as objectkeys scan targets.
+Fix the Task 3 recursive filelist discovery so final `RootDiscovery.prefixes` contains only non-overlapping objectkeys scan targets. Directories that have discovered child directory prefixes should not also be returned as objectkeys prefixes, because objectkeys prefix scans are recursive and would double-count child objects.
 
 ## Completed work
 
-- Added failing scanner tests before implementation for recursive depth, task limiting, per-directory pagination, and non-root object handling.
-- Updated `_scan_bucket()` to pass bucket-specific thresholds into discovery.
-- Extended `_discover_root()` to scan filelist directories breadth-first from `/`.
-- Enforced `thresholds.filelist_depth` with root counted as depth 1.
-- Enforced `scan.filelist_task_limit_per_bucket` with root counted as one filelist task.
-- Preserved every discovered folder prefix for later objectkeys collection, even when recursion stops at the task limit or depth limit.
-- Kept root directory object files in `root_files` for metadata collection.
-- Ignored non-root object files during filelist discovery so objectkeys prefix scans remain the source for nested objects.
-- Preserved full pagination for every scanned filelist directory using `nextOffset`.
-- Updated the end-to-end fake OBS client to tolerate the extra recursive `/alpha/` filelist call.
+- Added a red regression by changing the depth-2 recursive discovery expectation so expanded parent prefix `alpha/` is not returned with child prefix `alpha/beta/`.
+- Updated the task-limit regression so expanded parent `alpha/` is excluded while unexpanded boundary prefixes `alpha/beta/` and `bravo/` are retained.
+- Changed `_discover_root()` to track discovered directory prefixes separately from parent prefixes that have child directory prefixes.
+- Returned `discovered_prefixes - parent_prefixes` as sorted final objectkeys scan prefixes.
+- Preserved root file metadata behavior and non-root object filtering behavior.
+- Kept leaf directories and depth/task-limit boundary directories as final objectkeys prefixes.
+- Did not modify `config.py`.
 
 ## Remaining work
 
-None for this task.
+None for this repair.
 
 ## Key files changed
 
 - `src/obs_scan_platform/scanner.py`
 - `tests/test_scanner.py`
-- `tests/test_scan_end_to_end.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
-- Red: `pytest tests/test_scanner.py -k 'discover_root_recurses_to_filelist_depth or discover_root_limits_recursive_filelist_tasks or discover_root_reads_all_filelist_pages or discover_root_does_not_return_non_root_objects' -v`
-- Focused scanner: `pytest tests/test_scanner.py -v`
+- Red: `pytest tests/test_scanner.py -k 'discover_root_recurses_to_filelist_depth or discover_root_limits_recursive_filelist_tasks' -v`
 - Green required: `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`
 - Full suite: `pytest -q`
+- Final status: `/opt/homebrew/bin/git status --short --branch`
 
 ## Validation result
 
-- Red run failed as expected before implementation: 2 failed, 2 passed, with failures showing only `/` was filelisted instead of `/` plus `/alpha/`.
-- Focused scanner run after implementation: `19 passed in 0.17s`.
-- Required scanner/e2e run after implementation: `20 passed in 0.17s`.
-- Full suite after implementation: `75 passed, 1 warning in 0.39s`.
+- Red run failed before the fix: `2 failed, 17 deselected in 0.14s`; both failures showed `alpha/` was still present in final prefixes.
+- Green required run after the fix: `20 passed in 0.16s`.
+- Full suite after the fix: `75 passed, 1 warning in 0.40s`.
 - Warning: existing Starlette deprecation warning from `fastapi.testclient` importing `httpx`.
 
 ## Known risks
 
-- Directory traversal order is breadth-first and deterministic for current tests because filelist responses are processed in response order and final prefixes are sorted.
-- If the OBS filelist API returns root folder keys as multi-segment paths, root discovery intentionally keeps the existing first-segment behavior for compatibility with previous tests.
-- Reviewer subagent tooling was not available; a manual diff and requirements review was performed before commit.
+- If a directory has both direct object files and child directories, returning only child directory prefixes avoids duplicate recursive scans but does not add a separate direct-files-only collection mode. This follows the requested simpler approach and avoids expanding scope.
+- The handoff records the previous Task 3 implementation commit `4a404aa355f599ad874c2e94ab21cbbe0b077730` as supplemented by this repair commit.
 
 ## Next recommended action
 
-Review the pushed commit or continue with Task 4 once its requirements are ready.
+Review the pushed repair commit or continue with Task 4.
