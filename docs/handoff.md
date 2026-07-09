@@ -32,7 +32,8 @@ git rev-parse HEAD
 - Strengthened the shared-bucket end-to-end stub so the non-owner shared bucket now produces a folder prefix and downstream objectkeys request.
 - Added assertions proving the manifest includes `owned-bucket` and `reader-shared-bucket`, plus endpoint/filelist/objectkeys calls for `reader-shared-bucket`.
 - Kept the change scoped to test coverage; no production code changed for this review finding.
-- Updated `docs/current-task.md` and `.superpowers/sdd/task-3-report.md` for handoff.
+- The Task 3 scratch report now stays local in the worktree and is removed from git tracking.
+- Updated `docs/current-task.md` and `docs/handoff.md` so future agents do not treat the scratch report as committed state.
 
 ## Important decisions and rationale
 
@@ -40,11 +41,12 @@ git rev-parse HEAD
 - I kept the fix local to the end-to-end test stub so the production scanner path stayed untouched.
 - The shared bucket stub now returns a folder prefix only, which is enough to force the downstream objectkeys request without colliding with the existing metadata assertions.
 - I did not add new production behavior or broaden the test beyond the review finding.
+- For resume safety, future agents should verify the final branch head with `git rev-parse HEAD` rather than trusting this note alone.
 
 ## Failed attempts or rejected approaches
 
 - No production fix was required; the strengthened test passed once the stub exercised the folder/objectkeys path.
-- I did not add `.superpowers` files to git, per instruction.
+- I am not keeping `.superpowers/sdd/task-3-report.md` in git history; it remains a local scratch artifact only.
 
 ## Current test/build status
 
@@ -57,10 +59,11 @@ git rev-parse HEAD
 
 ## Uncommitted changes, if any
 
-- The review-fix work leaves `.superpowers/sdd/task-3-report.md` uncommitted on purpose. Verify with:
+- The scratch report should be untracked locally and absent from `git ls-files`. Verify with:
 
 ```bash
-git status --short --branch
+git ls-files .superpowers
+git status --short --branch --ignored .superpowers/sdd/task-3-report.md
 ```
 
 ## Exact resume instructions

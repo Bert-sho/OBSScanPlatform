@@ -18,37 +18,34 @@ Close the Task 3 review finding by proving the non-owner shared bucket reaches d
 
 ## Completed work
 
-- Strengthened `tests/test_scan_end_to_end.py` so the shared-bucket stub now returns a folder prefix that forces the scanner into `/rest/boto3/s3/list/bucket/objectkeys`.
-- Added an objectkeys branch for `SharedBucketOBSClient` so the shared bucket returns a simple object response instead of stopping at filelist.
-- Updated the shared-bucket end-to-end test to assert manifest inclusion plus downstream endpoint, filelist, and objectkeys calls for `reader-shared-bucket`.
-- Updated `docs/current-task.md`, `docs/handoff.md`, and `.superpowers/sdd/task-3-report.md` for the review fix handoff.
+- Removed `.superpowers/sdd/task-3-report.md` from git tracking while keeping the local scratch report readable in the worktree.
+- Updated `docs/current-task.md` and `docs/handoff.md` so they no longer imply the scratch report is committed.
+- Appended a local-only second review note to `.superpowers/sdd/task-3-report.md`.
 
 ## Remaining work
 
-- None. The review fix is complete and the strengthened test passes.
+- None. The scratch report is no longer tracked, and the local copy remains in the worktree.
 
 ## Key files changed
 
-- `tests/test_scan_end_to_end.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
 - `.superpowers/sdd/task-3-report.md`
 
 ## Validation commands run
 
-- `pytest tests/test_scan_end_to_end.py::test_scanner_run_includes_non_owner_shared_bucket_when_enabled -v`
-- `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`
 - `/opt/homebrew/bin/git diff --check`
+- `/opt/homebrew/bin/git ls-files .superpowers`
+- `/opt/homebrew/bin/git status --short --branch --ignored .superpowers/sdd/task-3-report.md`
 
 ## Validation result
 
-- GREEN: the strengthened shared-bucket end-to-end test passed, and the scanner test suite passed with `27 passed`.
-- `git diff --check` is clean.
+- GREEN: `git diff --check` is clean, `git ls-files .superpowers` returns no tracked scratch files, and `git status --short --branch --ignored .superpowers/sdd/task-3-report.md` shows the report as ignored/untracked with the staged deletion only.
 
 ## Known risks
 
-- Validation was targeted to scanner-focused tests only; I did not run the full repository test suite in this task.
+- This is a narrow cleanup, so the only meaningful risk is leaving the scratch report tracked again by accident.
 
 ## Next recommended action
 
-- No additional code work is required for Task 3. Confirm the final branch head with `git rev-parse HEAD` before handing off.
+- Remove the scratch report from tracking, re-run the status checks, then confirm the final branch head with `git rev-parse HEAD`.
