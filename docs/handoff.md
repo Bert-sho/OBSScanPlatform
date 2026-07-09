@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-09 13:49 CST
+2026-07-09 13:54 CST
 
 ## Machine/environment
 
@@ -18,11 +18,15 @@
 
 ## Latest commit before this session
 
-`dab05d737d5ac519d45460694377c8010375bf5f`
+`79aa60eeb19dfe1be321e69af5ecf61bf300f098` (`fix: handle empty buckets and log bucket duration`)
 
 ## Latest commit after this session
 
-The final Task 4 commit contains this handoff file, so this document does not try to predict its own commit hash. After commit, run `git rev-parse HEAD` to get the exact branch tip.
+Task 4 code delivery commit:
+
+`79aa60eeb19dfe1be321e69af5ecf61bf300f098` (`fix: handle empty buckets and log bucket duration`)
+
+This docs-only handoff correction follows that code delivery commit. The correction commit contains this file, so this document does not try to predict its own commit hash; run `git rev-parse HEAD` for the final branch tip.
 
 ## Summary of what changed
 
@@ -88,16 +92,7 @@ Warning: existing Starlette deprecation warning from `fastapi.testclient` import
 
 ## Uncommitted changes
 
-At handoff-writing time, Task 4 changes are ready to commit in:
-
-- `src/obs_scan_platform/scanner.py`
-- `tests/test_aggregation.py`
-- `tests/test_scanner.py`
-- `tests/test_scan_end_to_end.py`
-- `docs/current-task.md`
-- `docs/handoff.md`
-
-The expected final state after this session is a clean worktree pushed to `origin/codex/obs-scan-platform`.
+None. The worktree is clean after the docs-only handoff correction commit, and the Task 4 code delivery commit `79aa60eeb19dfe1be321e69af5ecf61bf300f098` has already been pushed to `origin/codex/obs-scan-platform`.
 
 ## Exact resume instructions
 
@@ -114,24 +109,15 @@ git status --short --branch
 git rev-parse HEAD
 ```
 
-3. Inspect any uncommitted changes before continuing:
+3. Verify the worktree is clean:
 
 ```bash
-git diff --stat
-git diff
+git status --short --branch
 ```
 
-4. Re-run validation if needed:
+4. Continue with Task 5. If you need a confidence check before starting, re-run:
 
 ```bash
 pytest tests/test_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -v
 pytest -q
-```
-
-5. If Task 4 changes remain uncommitted, commit and push:
-
-```bash
-git add src/obs_scan_platform/scanner.py tests/test_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py docs/current-task.md docs/handoff.md
-git commit -m "fix: handle empty buckets and log bucket duration"
-git push -u origin HEAD
 ```
