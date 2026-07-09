@@ -12,6 +12,7 @@ import httpx
 from obs_scan_platform.aggregation import aggregate_bucket
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds, load_config
 from obs_scan_platform.csv_store import append_object_rows
+from obs_scan_platform.filelist_discovery import FilelistDiscoveryScheduler
 from obs_scan_platform.logging_config import configure_logging
 from obs_scan_platform.models import BucketInfo, BucketScanResult, ObjectRow, RootDiscovery, ScanStatus
 from obs_scan_platform.obs_client import OBSClient, encode_object_key, encode_request_body
@@ -234,7 +235,7 @@ class Scanner:
         try:
             endpoint = await self._get_bucket_endpoint(application, bucket, client)
             discovery = await self._discover_root(application, bucket, client, thresholds)
-            await self._collect_root_files(application, bucket, endpoint, discovery.root_files, temp_dir, client)
+            await self._collect_root_files(application, bucket, endpoint, discovery.metadata_files, temp_dir, client)
             await self._collect_prefixes(application, bucket, endpoint, discovery.prefixes, temp_dir, client)
             aggregate_bucket(
                 run_id=run_id,
@@ -314,87 +315,77 @@ class Scanner:
         thresholds = thresholds or self.config.thresholds_for(application, bucket.name)
         max_depth = max(1, thresholds.filelist_depth)
         task_limit = max(1, self.config.scan.filelist_task_limit_per_bucket)
-        discovered_prefixes: set[str] = set()
-        root_files: list[str] = []
         url = _endpoint(self.config.endpoint_for(application), "/rest/s3/bucket/filelist")
-        queue: list[tuple[str, int]] = [("/", 1)]
-        queued_paths: set[str] = {"/"}
-        scanned_paths: set[str] = set()
-        started_tasks = 0
-        completed_tasks = 0
-        total_tasks = 1
-        progress_bar = self._filelist_progress_bar(application, bucket, total_tasks) if self.show_progress else None
+        scheduler = FilelistDiscoveryScheduler(max_depth=max_depth, task_limit=task_limit)
+        progress_bar = (
+            self._filelist_progress_bar(application, bucket, scheduler.total_tasks) if self.show_progress else None
+        )
         if progress_bar is not None:
-            progress_bar.total = total_tasks
+            progress_bar.total = scheduler.total_tasks
         try:
-            while queue and started_tasks < task_limit:
-                path, depth = queue.pop(0)
-                if path in scanned_paths:
-                    continue
-                scanned_paths.add(path)
-                started_tasks += 1
-                pointer = ""
-                while True:
-                    request_body = encode_request_body(
-                        {
-                            "id": bucket.bucket_id,
-                            "path": path,
-                            "pointer": pointer,
-                            "size": self.config.scan.page_size,
-                        }
-                    )
-                    data = await client.get_json(
-                        url,
-                        params={"appid": application.appid, "requestbody": request_body},
-                        headers={**JSON_HEADERS, "csb-token": application.apptoken},
-                        endpoint="filelist",
-                    )
-                    payload = _result_payload(data)
-                    for item in _items_from_payload(payload, "files", "list", "items"):
-                        object_type = str(item.get("objectType") or "").lower()
-                        object_key = item.get("objectKey")
-                        if object_type == "folder":
-                            prefix = self._filelist_folder_prefix(path, object_key or item.get("name"))
-                            if prefix:
-                                discovered_prefixes.add(prefix)
-                                queued_path = "/" + prefix
-                                if (
-                                    depth < max_depth
-                                    and queued_path not in scanned_paths
-                                    and queued_path not in queued_paths
-                                    and total_tasks < task_limit
-                                ):
-                                    queue.append((queued_path, depth + 1))
-                                    queued_paths.add(queued_path)
-                                    total_tasks += 1
-                                    if progress_bar is not None:
-                                        progress_bar.total = total_tasks
+            while True:
+                tasks = scheduler.current_level()
+                if not tasks:
+                    break
+                for task in tasks:
+                    path = task.path
+                    pointer = ""
+                    while True:
+                        request_body = encode_request_body(
+                            {
+                                "id": bucket.bucket_id,
+                                "path": path,
+                                "pointer": pointer,
+                                "size": self.config.scan.page_size,
+                            }
+                        )
+                        data = await client.get_json(
+                            url,
+                            params={"appid": application.appid, "requestbody": request_body},
+                            headers={**JSON_HEADERS, "csb-token": application.apptoken},
+                            endpoint="filelist",
+                        )
+                        payload = _result_payload(data)
+                        for item in _items_from_payload(payload, "files", "list", "items"):
+                            object_type = str(item.get("objectType") or "").lower()
+                            object_key = item.get("objectKey")
+                            if object_type == "folder":
+                                prefix = self._filelist_folder_prefix(path, object_key or item.get("name"))
+                                if prefix:
+                                    scheduler.record_folder(task, prefix)
+                                    if progress_bar is not None and progress_bar.total != scheduler.pending_total_tasks:
+                                        progress_bar.total = scheduler.pending_total_tasks
                                         progress_bar.refresh()
-                        elif path == "/" and object_key:
-                            root_files.append(str(object_key))
+                            elif object_key:
+                                scheduler.record_file(task, str(object_key))
 
-                    next_pointer = None
-                    if isinstance(payload, dict):
-                        next_pointer = str(payload.get("nextOffset") or "")
-                    if not next_pointer or next_pointer == pointer:
-                        break
-                    pointer = next_pointer
+                        next_pointer = None
+                        if isinstance(payload, dict):
+                            next_pointer = str(payload.get("nextOffset") or "")
+                        if not next_pointer or next_pointer == pointer:
+                            break
+                        pointer = next_pointer
 
-                completed_tasks += 1
-                LOGGER.info(
-                    "filelist progress appid=%s bucket=%s completed=%s total=%s",
-                    application.appid,
-                    bucket.name,
-                    completed_tasks,
-                    total_tasks,
-                )
+                    scheduler.mark_completed(task)
+                    LOGGER.info(
+                        "filelist progress appid=%s bucket=%s completed=%s total=%s",
+                        application.appid,
+                        bucket.name,
+                        scheduler.completed_tasks,
+                        scheduler.pending_total_tasks,
+                    )
+                    if progress_bar is not None:
+                        progress_bar.update(1)
+                if not scheduler.finish_level():
+                    break
                 if progress_bar is not None:
-                    progress_bar.update(1)
+                    progress_bar.total = scheduler.total_tasks
+                    progress_bar.refresh()
         finally:
             if progress_bar is not None:
                 progress_bar.close()
 
-        return RootDiscovery(prefixes=self._top_level_prefixes(discovered_prefixes), root_files=root_files)
+        return scheduler.result()
 
     def _filelist_progress_bar(self, application: ApplicationConfig, bucket: BucketInfo, total: int) -> Any | None:
         if not self.show_progress:
@@ -402,13 +393,6 @@ class Scanner:
         from tqdm import tqdm
 
         return tqdm(total=total, desc=f"{application.appid}/{bucket.name} filelist", unit="dir")
-
-    def _top_level_prefixes(self, prefixes: set[str]) -> list[str]:
-        selected: list[str] = []
-        for prefix in sorted(prefixes):
-            if not any(prefix.startswith(parent) for parent in selected):
-                selected.append(prefix)
-        return selected
 
     def _filelist_folder_prefix(self, path: str, value: Any) -> str:
         raw_prefix = str(value or "").strip("/")

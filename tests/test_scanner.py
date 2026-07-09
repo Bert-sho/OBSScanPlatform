@@ -383,26 +383,84 @@ async def test_discover_root_does_not_create_progress_bar_by_default(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_discover_root_limits_recursive_filelist_tasks_but_keeps_discovered_prefixes():
+async def test_discover_root_processes_whole_level_even_when_it_exceeds_task_limit():
     scanner, application, bucket = make_scanner()
     scanner.config.defaults.filelist_depth = 5
-    scanner.config.scan.filelist_task_limit_per_bucket = 2
+    scanner.config.scan.filelist_task_limit_per_bucket = 3
+    level_two_folders = [f"dir-{index}/" for index in range(5)]
     client = FakeClient(
         [
             {
                 "result": {
                     "files": [
+                        {"objectType": "folder", "objectKey": folder}
+                        for folder in level_two_folders
+                    ],
+                    "nextOffset": "",
+                }
+            },
+            *[
+                {
+                    "result": {
+                        "files": [{"objectType": "folder", "objectKey": f"{folder}child/"}],
+                        "nextOffset": "",
+                    }
+                }
+                for folder in level_two_folders
+            ],
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert [decode_request_body(call)["path"] for call in client.calls] == [
+        "/",
+        "/dir-0/",
+        "/dir-1/",
+        "/dir-2/",
+        "/dir-3/",
+        "/dir-4/",
+    ]
+    assert discovery.prefixes == [f"dir-{index}/" for index in range(5)]
+
+
+@pytest.mark.asyncio
+async def test_discover_root_schedules_deeper_level_when_current_level_keeps_total_below_limit():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 3
+    scanner.config.scan.filelist_task_limit_per_bucket = 10
+    client = FakeClient(
+        [
+            {"result": {"files": [{"objectType": "folder", "objectKey": "alpha/"}], "nextOffset": ""}},
+            {"result": {"files": [{"objectType": "folder", "objectKey": "alpha/beta/"}], "nextOffset": ""}},
+            {"result": {"files": [], "nextOffset": ""}},
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/", "/alpha/beta/"]
+    assert discovery.prefixes == ["alpha/"]
+
+
+@pytest.mark.asyncio
+async def test_discover_root_returns_metadata_files_not_covered_by_objectkeys_prefixes():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [
+                        {"objectType": "object", "objectKey": "root.txt"},
                         {"objectType": "folder", "objectKey": "alpha/"},
-                        {"objectType": "folder", "objectKey": "bravo/"},
                     ],
                     "nextOffset": "",
                 }
             },
             {
                 "result": {
-                    "files": [
-                        {"objectType": "folder", "objectKey": "alpha/beta/"},
-                    ],
+                    "files": [{"objectType": "object", "objectKey": "alpha/direct.txt"}],
                     "nextOffset": "",
                 }
             },
@@ -411,9 +469,8 @@ async def test_discover_root_limits_recursive_filelist_tasks_but_keeps_discovere
 
     discovery = await scanner._discover_root(application, bucket, client)
 
-    assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/"]
-    assert discovery.prefixes == ["alpha/", "bravo/"]
-    assert discovery.root_files == []
+    assert discovery.prefixes == ["alpha/"]
+    assert discovery.metadata_files == ["root.txt"]
 
 
 @pytest.mark.asyncio

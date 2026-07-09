@@ -26,7 +26,11 @@ class BucketInfo:
 @dataclass(frozen=True)
 class RootDiscovery:
     prefixes: list[str]
-    root_files: list[str]
+    metadata_files: list[str]
+
+    @property
+    def root_files(self) -> list[str]:
+        return self.metadata_files
 
 
 @dataclass(frozen=True)
