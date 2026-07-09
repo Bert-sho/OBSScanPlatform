@@ -22,7 +22,9 @@
 
 ## Latest commit after this session
 
-Pending repair commit hash. This section will be updated by a follow-up docs-only correction after `fix: preserve parent prefix coverage` is committed, because a commit cannot contain its own hash in a tracked file.
+`37b0b1d48b0ac844e4bc6f0563b2ee73992210a4` (`fix: preserve parent prefix coverage`)
+
+This docs-only correction records the repair commit above explicitly so future agents do not need chat history to identify the Task 3 coverage fix.
 
 ## Summary of what changed
 
@@ -135,5 +137,7 @@ pytest -q
 ```bash
 /opt/homebrew/bin/git add src/obs_scan_platform/scanner.py tests/test_scanner.py tests/test_scan_end_to_end.py docs/current-task.md docs/handoff.md
 /opt/homebrew/bin/git commit -m "fix: preserve parent prefix coverage"
+/opt/homebrew/bin/git add docs/handoff.md
+/opt/homebrew/bin/git commit -m "docs: record parent prefix coverage handoff"
 /opt/homebrew/bin/git push -u origin HEAD
 ```
