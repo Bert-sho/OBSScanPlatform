@@ -22,11 +22,11 @@
 
 ## Latest commit after this session
 
-Task 5 code delivery is pending commit at the time this handoff is written. After commit, the commit should use:
+Task 5 code delivery commit:
 
-`feat: add filelist progress reporting`
+`3af43829d2af4f3bf2c85b405b7571a5e9d5b521` (`feat: add filelist progress reporting`)
 
-The final branch tip should be reported in the Codex final response after commit and push.
+This docs-only handoff correction follows that code delivery commit. The final branch tip after this correction is reported in the Codex final response.
 
 ## Summary of what changed
 
@@ -100,17 +100,7 @@ Warning: existing Starlette deprecation warning from `fastapi.testclient` import
 
 ## Uncommitted changes
 
-Task 5 changes are intentionally uncommitted while this handoff is being updated. Expected changed files before commit:
-
-- `pyproject.toml`
-- `src/obs_scan_platform/scanner.py`
-- `src/obs_scan_platform/cli.py`
-- `src/obs_scan_platform/api.py`
-- `tests/test_scanner.py`
-- `tests/test_cli.py`
-- `tests/test_api.py`
-- `docs/current-task.md`
-- `docs/handoff.md`
+None. The Task 5 code delivery commit `3af43829d2af4f3bf2c85b405b7571a5e9d5b521` has been pushed to `origin/codex/obs-scan-platform`; this handoff correction should also leave the worktree clean after commit and push.
 
 ## Exact resume instructions
 
@@ -120,27 +110,18 @@ Task 5 changes are intentionally uncommitted while this handoff is being updated
 cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
 ```
 
-2. Review status and diff:
+2. Check branch, status, and latest commit:
 
 ```bash
 /opt/homebrew/bin/git status --short --branch
-/opt/homebrew/bin/git diff --stat
-/opt/homebrew/bin/git diff
+/opt/homebrew/bin/git rev-parse HEAD
 ```
 
-3. If continuing this Task 5 session, run:
+3. If you need a confidence check before Task 6, run:
 
 ```bash
 pytest tests/test_scanner.py tests/test_cli.py tests/test_api.py -v
 pytest -q
 ```
 
-4. Commit and push if validation remains green:
-
-```bash
-/opt/homebrew/bin/git add pyproject.toml src/obs_scan_platform/scanner.py src/obs_scan_platform/cli.py src/obs_scan_platform/api.py tests/test_scanner.py tests/test_cli.py tests/test_api.py docs/current-task.md docs/handoff.md
-/opt/homebrew/bin/git commit -m "feat: add filelist progress reporting"
-/opt/homebrew/bin/git push -u origin HEAD
-```
-
-5. Continue with Task 6 documentation and end-to-end compatibility.
+4. Continue with Task 6 documentation and end-to-end compatibility.
