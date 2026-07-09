@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-09 13:17 CST
+2026-07-09 13:27 CST
 
 ## Machine/environment
 
@@ -18,67 +18,64 @@
 
 ## Latest commit before this session
 
-`c5632d7b1a6265addb8d43d2c897a7822fdd456c`
+`6a14028e1581e1cd3309a7730e467e352ba715a9` (`docs: update handoff after scanner task`)
 
 ## Latest commit after this session
 
-Scanner task delivery commit:
-
-`c3797168cba5389c35d667574c0ea34804c71556` (`feat: use global endpoint and shared bucket switch`)
-
-This handoff file is being corrected by a later docs-only commit. The scanner implementation remains in `c3797168cba5389c35d667574c0ea34804c71556`; the branch tip after the docs-only correction is the commit that contains this updated handoff and is reported by `git rev-parse HEAD`.
+The exact post-session commit hash is reported in the final Codex response after commit creation. This file is included in that same commit, so it cannot contain its own final hash without changing that hash.
 
 ## Summary of what changed
 
-Task 2 updated only the scanner layer and related tests for global endpoint resolution and shared bucket inclusion:
+Task 3 implemented bounded recursive OBS filelist directory discovery:
 
 - `src/obs_scan_platform/scanner.py`
-  - Added `should_scan_bucket(bucket, include_shared)`.
-  - Preserved `is_owned_bucket(bucket)` for existing callers/tests.
-  - Introduced `_list_buckets()` that calls `self.config.endpoint_for(application)` and filters with `application.scan_shared_buckets`.
-  - Kept `_list_owned_buckets()` as a compatibility wrapper.
-  - Updated `_scan_application()` to use `_list_buckets()`.
-  - Updated `_get_bucket_endpoint()` and `_discover_root()` to use `self.config.endpoint_for(application)`.
+  - `_scan_bucket()` now passes `thresholds = self.config.thresholds_for(application, bucket.name)` into `_discover_root()`.
+  - `_discover_root()` scans from `/` breadth-first and respects `thresholds.filelist_depth`.
+  - `scan.filelist_task_limit_per_bucket` limits directory filelist tasks, with `/` counted as task 1.
+  - Every scanned directory still follows all filelist pages until `nextOffset` is empty or repeated.
+  - Folder entries are accumulated into sorted `RootDiscovery.prefixes` for later objectkeys collection.
+  - Root object entries are accumulated into `RootDiscovery.root_files` for metadata collection.
+  - Non-root object entries seen during filelist discovery are ignored, leaving nested object collection to existing objectkeys prefix scanning.
 - `tests/test_scanner.py`
-  - Added coverage for owned, shared, and non-owner bucket filtering.
-  - Added coverage that list bucket calls use the top-level endpoint and include shared buckets only when enabled.
-  - Tightened existing endpoint and root discovery tests to assert global endpoint use.
+  - Added regression coverage for depth-2 recursion, task-limit behavior, full filelist pagination, and ignoring non-root filelist object entries.
+  - Added requestbody decoding helper for path and pointer assertions.
+  - Updated two existing root discovery fixtures to include empty child directory responses because default filelist depth remains 5.
 - `tests/test_scan_end_to_end.py`
-  - Changed mocked config to use top-level `endpoint`.
-  - Preserved default shared-bucket exclusion.
-  - Updated manifest threshold expectation to include `filelist_depth: 5`.
+  - Updated the fake OBS filelist endpoint to return an empty listing for the recursive `/alpha/` call.
 
 ## Important decisions and rationale
 
-- `config.py` was not modified, per task instruction.
-- `is_owned_bucket()` semantics remain unchanged for backward compatibility: owner and `share_from is None`.
-- `should_scan_bucket()` treats shared buckets as owner buckets with `share_from` set, included only when `include_shared=True`.
-- The old `_list_owned_buckets()` method remains available and delegates to `_list_buckets()` to avoid breaking tests or downstream private callers.
-- Endpoint resolution is centralized at scanner call sites through `self.config.endpoint_for(application)` so top-level endpoint is preferred with application endpoint fallback handled by Task 1 config behavior.
+- `config.py` was not modified, per task instruction and because Task 1/2 already provide `filelist_depth` and the filelist task limit.
+- `RootDiscovery(prefixes, root_files)` remains unchanged to avoid widening the model surface.
+- Breadth-first traversal keeps task limiting simple: once the configured number of directory filelist calls has started, no new directory is scanned, but already discovered prefixes remain available for objectkeys scans.
+- Root is depth 1. With `filelist_depth=2`, discovery scans `/` and one child directory level.
+- The implementation preserves the older behavior that root filelist entries like `alpha/nested/` become `alpha/`, avoiding an unrelated compatibility change.
+- Empty directory listings return successfully and simply contribute no new prefixes or root files.
 
 ## Failed attempts or rejected approaches
 
-- Initial `apply_patch` attempted relative to the parent checkout and failed with `No such file or directory`; no files were changed by that attempt.
-- Required red run failed before implementation with `ImportError: cannot import name 'should_scan_bucket'`, confirming the test exercised missing behavior.
-- Reviewer subagent tooling was searched for but not available in this session; only GitHub PR review tools were exposed. A manual read-only review of `git diff` against the user requirements was performed.
+- Red TDD run before implementation failed as expected for the new recursive tests: only `/` was filelisted, so expected `/alpha/` calls were missing.
+- After initial implementation, two old root-only scanner fixtures failed because default depth 5 now recurses; fixed by adding empty child responses.
+- The first required scanner/e2e run failed because the E2E fake OBS client asserted filelist path `/` only; fixed by allowing `/alpha/` to return an empty filelist result.
+- A callable reviewer/subagent tool was not available in this session; only GitHub PR review tools were exposed and no PR existed. A manual requirements and diff review was performed instead.
 
 ## Current test/build status
 
 Red run before implementation:
 
 ```bash
-pytest tests/test_scanner.py::test_should_scan_bucket_includes_owned_and_optional_shared_buckets tests/test_scanner.py::test_list_buckets_uses_global_endpoint_and_includes_shared_when_enabled tests/test_scanner.py::test_get_bucket_endpoint_uses_bucket_name_as_bucketid_and_id_as_bucket_uid tests/test_scanner.py::test_discover_root_uses_bucket_filelist_and_parses_first_level_items tests/test_scan_end_to_end.py::test_scanner_run_completes_with_mocked_obs_and_directory_csv -q
+pytest tests/test_scanner.py -k 'discover_root_recurses_to_filelist_depth or discover_root_limits_recursive_filelist_tasks or discover_root_reads_all_filelist_pages or discover_root_does_not_return_non_root_objects' -v
 ```
 
-Result: failed during collection with `ImportError: cannot import name 'should_scan_bucket'`.
+Result: `2 failed, 2 passed, 15 deselected in 0.13s`. The failures confirmed root-only discovery: expected filelist paths `["/", "/alpha/"]`, actual `["/"]`.
 
-Targeted post-implementation run:
+Focused scanner run after implementation:
 
 ```bash
-pytest tests/test_scanner.py::test_should_scan_bucket_includes_owned_and_optional_shared_buckets tests/test_scanner.py::test_list_buckets_uses_global_endpoint_and_includes_shared_when_enabled tests/test_scanner.py::test_get_bucket_endpoint_uses_bucket_name_as_bucketid_and_id_as_bucket_uid tests/test_scanner.py::test_discover_root_uses_bucket_filelist_and_parses_first_level_items tests/test_scan_end_to_end.py::test_scanner_run_completes_with_mocked_obs_and_directory_csv -q
+pytest tests/test_scanner.py -v
 ```
 
-Result: `5 passed in 0.08s`.
+Result: `19 passed in 0.17s`.
 
 Required scanner/e2e suite:
 
@@ -86,7 +83,7 @@ Required scanner/e2e suite:
 pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v
 ```
 
-Result: `16 passed in 0.15s`.
+Result: `20 passed in 0.17s`.
 
 Full suite:
 
@@ -94,15 +91,21 @@ Full suite:
 pytest -q
 ```
 
-Result: `71 passed, 1 warning in 0.38s`.
+Result: `75 passed, 1 warning in 0.39s`.
 
 Warning: existing Starlette deprecation warning from `fastapi.testclient` importing `httpx`.
 
 ## Uncommitted changes
 
-None at the end of the scanner task. The scanner task commit `c3797168cba5389c35d667574c0ea34804c71556` was pushed to `origin/codex/obs-scan-platform`.
+At the time this handoff was written, the intended uncommitted changes were limited to:
 
-This docs-only handoff correction should also leave the worktree clean after commit and push.
+- `src/obs_scan_platform/scanner.py`
+- `tests/test_scanner.py`
+- `tests/test_scan_end_to_end.py`
+- `docs/current-task.md`
+- `docs/handoff.md`
+
+Generated `__pycache__` directories from test runs were removed before commit.
 
 ## Exact resume instructions
 
@@ -119,7 +122,7 @@ git status --short --branch
 git rev-parse HEAD
 ```
 
-3. If this docs-only correction did not finish committing, inspect the diff:
+3. If any changes remain uncommitted, inspect them:
 
 ```bash
 git diff --stat
@@ -133,15 +136,10 @@ pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v
 pytest -q
 ```
 
-5. Commit any remaining docs-only handoff correction with:
+5. If this session did not finish commit/push, commit and push with:
 
 ```bash
-git add docs/handoff.md
-git commit -m "docs: update handoff after scanner task"
-```
-
-6. Push with:
-
-```bash
+git add src/obs_scan_platform/scanner.py tests/test_scanner.py tests/test_scan_end_to_end.py docs/current-task.md docs/handoff.md
+git commit -m "feat: discover prefixes with bounded filelist recursion"
 git push -u origin HEAD
 ```

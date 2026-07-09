@@ -1,7 +1,10 @@
 import asyncio
+import base64
 import csv
+import json
 import inspect
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -55,6 +58,10 @@ class RepeatingRootOffsetClient:
         await asyncio.sleep(0)
         self.calls.append({"url": url, "params": params, "headers": headers})
         return {"result": {"files": [], "nextOffset": 1}}
+
+
+def decode_request_body(call: dict[str, Any]) -> dict[str, Any]:
+    return json.loads(base64.urlsafe_b64decode(call["params"]["requestbody"].encode("utf-8")).decode("utf-8"))
 
 
 def make_scanner() -> tuple[Scanner, ApplicationConfig, BucketInfo]:
@@ -186,7 +193,8 @@ async def test_discover_root_uses_bucket_filelist_and_parses_first_level_items()
                         {"objectType": "object", "objectKey": "root.txt"},
                     ]
                 }
-            }
+            },
+            {"result": {"files": [], "nextOffset": ""}},
         ]
     )
 
@@ -210,7 +218,131 @@ async def test_discover_root_treats_capitalized_folder_as_prefix():
                         {"objectType": "Folder", "objectKey": "alpha/nested/"},
                     ]
                 }
-            }
+            },
+            {"result": {"files": [], "nextOffset": ""}},
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert discovery.prefixes == ["alpha/"]
+    assert discovery.root_files == []
+
+
+@pytest.mark.asyncio
+async def test_discover_root_recurses_to_filelist_depth_and_finds_nested_prefixes():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [
+                        {"objectType": "folder", "objectKey": "alpha/"},
+                        {"objectType": "object", "objectKey": "root.txt"},
+                    ],
+                    "nextOffset": "",
+                }
+            },
+            {
+                "result": {
+                    "files": [
+                        {"objectType": "folder", "objectKey": "alpha/beta/"},
+                        {"objectType": "object", "objectKey": "alpha/ignored.txt"},
+                    ],
+                    "nextOffset": "",
+                }
+            },
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/"]
+    assert discovery.prefixes == ["alpha/", "alpha/beta/"]
+    assert discovery.root_files == ["root.txt"]
+
+
+@pytest.mark.asyncio
+async def test_discover_root_limits_recursive_filelist_tasks_but_keeps_discovered_prefixes():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 5
+    scanner.config.scan.filelist_task_limit_per_bucket = 2
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [
+                        {"objectType": "folder", "objectKey": "alpha/"},
+                        {"objectType": "folder", "objectKey": "bravo/"},
+                    ],
+                    "nextOffset": "",
+                }
+            },
+            {
+                "result": {
+                    "files": [
+                        {"objectType": "folder", "objectKey": "alpha/beta/"},
+                    ],
+                    "nextOffset": "",
+                }
+            },
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/"]
+    assert discovery.prefixes == ["alpha/", "alpha/beta/", "bravo/"]
+    assert discovery.root_files == []
+
+
+@pytest.mark.asyncio
+async def test_discover_root_reads_all_filelist_pages_for_each_directory():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 1
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "alpha/"}],
+                    "nextOffset": "page-2",
+                }
+            },
+            {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "bravo/"}],
+                    "nextOffset": "",
+                }
+            },
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert [decode_request_body(call)["pointer"] for call in client.calls] == ["", "page-2"]
+    assert discovery.prefixes == ["alpha/", "bravo/"]
+    assert discovery.root_files == []
+
+
+@pytest.mark.asyncio
+async def test_discover_root_does_not_return_non_root_objects_as_root_files():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "alpha/"}],
+                    "nextOffset": "",
+                }
+            },
+            {
+                "result": {
+                    "files": [{"objectType": "object", "objectKey": "alpha/not-root.txt"}],
+                    "nextOffset": "",
+                }
+            },
         ]
     )
 

@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Task 2 scanner endpoint and shared bucket support
+Task 3 recursive filelist directory discovery
 
 ## Current branch
 
@@ -14,19 +14,20 @@ Task 2 scanner endpoint and shared bucket support
 
 ## User goal
 
-Update the scanner layer to use global endpoint resolution through `AppConfigFile.endpoint_for(application)` and to support the application-level `scan_shared_buckets` switch, without modifying `src/obs_scan_platform/config.py`.
+Use the OBS filelist API recursively per bucket, with recursion depth coming from `thresholds.filelist_depth`, while bounding directory filelist calls with `scan.filelist_task_limit_per_bucket`. Keep root files as metadata targets and discovered directory prefixes as objectkeys scan targets.
 
 ## Completed work
 
-- Added `should_scan_bucket(bucket, include_shared)` while preserving `is_owned_bucket(bucket)`.
-- Changed scanner bucket listing to use `self.config.endpoint_for(application)`.
-- Kept `_list_owned_buckets()` as a compatibility wrapper around the new `_list_buckets()` behavior.
-- Made `_scan_application()` call `_list_buckets()`.
-- Made `_get_bucket_endpoint()` and `_discover_root()` use the resolved global/application endpoint.
-- Added scanner tests for owned/shared/non-owner bucket selection.
-- Added scanner tests covering top-level endpoint usage and inclusion of shared buckets when `scan_shared_buckets=True`.
-- Updated the end-to-end scanner test to use a top-level endpoint and expect `filelist_depth: 5` in manifest thresholds.
-- Preserved default `scan_shared_buckets=False` behavior that excludes shared buckets.
+- Added failing scanner tests before implementation for recursive depth, task limiting, per-directory pagination, and non-root object handling.
+- Updated `_scan_bucket()` to pass bucket-specific thresholds into discovery.
+- Extended `_discover_root()` to scan filelist directories breadth-first from `/`.
+- Enforced `thresholds.filelist_depth` with root counted as depth 1.
+- Enforced `scan.filelist_task_limit_per_bucket` with root counted as one filelist task.
+- Preserved every discovered folder prefix for later objectkeys collection, even when recursion stops at the task limit or depth limit.
+- Kept root directory object files in `root_files` for metadata collection.
+- Ignored non-root object files during filelist discovery so objectkeys prefix scans remain the source for nested objects.
+- Preserved full pagination for every scanned filelist directory using `nextOffset`.
+- Updated the end-to-end fake OBS client to tolerate the extra recursive `/alpha/` filelist call.
 
 ## Remaining work
 
@@ -42,23 +43,25 @@ None for this task.
 
 ## Validation commands run
 
-- `pytest tests/test_scanner.py::test_should_scan_bucket_includes_owned_and_optional_shared_buckets tests/test_scanner.py::test_list_buckets_uses_global_endpoint_and_includes_shared_when_enabled tests/test_scanner.py::test_get_bucket_endpoint_uses_bucket_name_as_bucketid_and_id_as_bucket_uid tests/test_scanner.py::test_discover_root_uses_bucket_filelist_and_parses_first_level_items tests/test_scan_end_to_end.py::test_scanner_run_completes_with_mocked_obs_and_directory_csv -q`
-- `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`
-- `pytest -q`
+- Red: `pytest tests/test_scanner.py -k 'discover_root_recurses_to_filelist_depth or discover_root_limits_recursive_filelist_tasks or discover_root_reads_all_filelist_pages or discover_root_does_not_return_non_root_objects' -v`
+- Focused scanner: `pytest tests/test_scanner.py -v`
+- Green required: `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`
+- Full suite: `pytest -q`
 
 ## Validation result
 
-- Red test run before implementation failed at collection with `ImportError: cannot import name 'should_scan_bucket'`, confirming missing behavior/API.
-- Targeted post-implementation run: `5 passed in 0.08s`.
-- Required scanner/e2e suite: `16 passed in 0.15s`.
-- Full suite: `71 passed, 1 warning in 0.38s`.
+- Red run failed as expected before implementation: 2 failed, 2 passed, with failures showing only `/` was filelisted instead of `/` plus `/alpha/`.
+- Focused scanner run after implementation: `19 passed in 0.17s`.
+- Required scanner/e2e run after implementation: `20 passed in 0.17s`.
+- Full suite after implementation: `75 passed, 1 warning in 0.39s`.
 - Warning: existing Starlette deprecation warning from `fastapi.testclient` importing `httpx`.
 
 ## Known risks
 
-- No functional risks identified in the touched scanner layer.
-- Reviewer subagent tooling was not available in this session; a manual diff/requirements review was performed instead.
+- Directory traversal order is breadth-first and deterministic for current tests because filelist responses are processed in response order and final prefixes are sorted.
+- If the OBS filelist API returns root folder keys as multi-segment paths, root discovery intentionally keeps the existing first-segment behavior for compatibility with previous tests.
+- Reviewer subagent tooling was not available; a manual diff and requirements review was performed before commit.
 
 ## Next recommended action
 
-Review the pushed commit or continue with the next implementation task from the broader OBS scan platform plan.
+Review the pushed commit or continue with Task 4 once its requirements are ready.

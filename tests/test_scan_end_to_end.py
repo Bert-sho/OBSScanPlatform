@@ -77,6 +77,8 @@ class FakeOBSClient:
         if url.endswith("/rest/s3/bucket/filelist"):
             request_body = _decode_base64_json(params["requestbody"])
             assert request_body["id"] == "owned-id"
+            if request_body["path"] == "/alpha/":
+                return {"result": {"files": [], "nextOffset": ""}}
             assert request_body["path"] == "/"
             return {
                 "result": {

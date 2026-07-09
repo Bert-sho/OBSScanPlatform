@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from obs_scan_platform.aggregation import aggregate_bucket
-from obs_scan_platform.config import AppConfigFile, ApplicationConfig, load_config
+from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds, load_config
 from obs_scan_platform.csv_store import append_object_rows
 from obs_scan_platform.logging_config import configure_logging
 from obs_scan_platform.models import BucketInfo, BucketScanResult, ObjectRow, RootDiscovery, ScanStatus
@@ -218,7 +218,7 @@ class Scanner:
         output_path = results_dir / application.appid / f"{bucket.name}.csv"
         try:
             endpoint = await self._get_bucket_endpoint(application, bucket, client)
-            discovery = await self._discover_root(application, bucket, client)
+            discovery = await self._discover_root(application, bucket, client, thresholds)
             await self._collect_root_files(application, bucket, endpoint, discovery.root_files, temp_dir, client)
             await self._collect_prefixes(application, bucket, endpoint, discovery.prefixes, temp_dir, client)
             aggregate_bucket(
@@ -280,45 +280,71 @@ class Scanner:
         application: ApplicationConfig,
         bucket: BucketInfo,
         client: OBSClient,
+        thresholds: Thresholds | None = None,
     ) -> RootDiscovery:
+        thresholds = thresholds or self.config.thresholds_for(application, bucket.name)
+        max_depth = max(1, thresholds.filelist_depth)
+        task_limit = max(1, self.config.scan.filelist_task_limit_per_bucket)
         prefixes: set[str] = set()
         root_files: list[str] = []
-        pointer = ""
         url = _endpoint(self.config.endpoint_for(application), "/rest/s3/bucket/filelist")
+        queue: list[tuple[str, int]] = [("/", 1)]
+        scanned_paths: set[str] = set()
+        started_tasks = 0
 
-        while True:
-            request_body = encode_request_body(
-                {
-                    "id": bucket.bucket_id,
-                    "path": "/",
-                    "pointer": pointer,
-                    "size": self.config.scan.page_size,
-                }
-            )
-            data = await client.get_json(
-                url,
-                params={"appid": application.appid, "requestbody": request_body},
-                headers={**JSON_HEADERS, "csb-token": application.apptoken},
-            )
-            payload = _result_payload(data)
-            for item in _items_from_payload(payload, "files", "list", "items"):
-                object_type = str(item.get("objectType") or "").lower()
-                object_key = item.get("objectKey")
-                if object_type == "folder":
-                    prefix = str(object_key or item.get("name") or "").strip("/")
-                    if prefix:
-                        prefixes.add(f"{prefix.split('/', 1)[0]}/")
-                elif object_key:
-                    root_files.append(str(object_key))
+        while queue and started_tasks < task_limit:
+            path, depth = queue.pop(0)
+            if path in scanned_paths:
+                continue
+            scanned_paths.add(path)
+            started_tasks += 1
+            pointer = ""
+            while True:
+                request_body = encode_request_body(
+                    {
+                        "id": bucket.bucket_id,
+                        "path": path,
+                        "pointer": pointer,
+                        "size": self.config.scan.page_size,
+                    }
+                )
+                data = await client.get_json(
+                    url,
+                    params={"appid": application.appid, "requestbody": request_body},
+                    headers={**JSON_HEADERS, "csb-token": application.apptoken},
+                )
+                payload = _result_payload(data)
+                for item in _items_from_payload(payload, "files", "list", "items"):
+                    object_type = str(item.get("objectType") or "").lower()
+                    object_key = item.get("objectKey")
+                    if object_type == "folder":
+                        prefix = self._filelist_folder_prefix(path, object_key or item.get("name"))
+                        if prefix:
+                            prefixes.add(prefix)
+                            if depth < max_depth and prefix not in scanned_paths:
+                                queue.append(("/" + prefix, depth + 1))
+                    elif path == "/" and object_key:
+                        root_files.append(str(object_key))
 
-            next_pointer = None
-            if isinstance(payload, dict):
-                next_pointer = str(payload.get("nextOffset") or "")
-            if not next_pointer or next_pointer == pointer:
-                break
-            pointer = next_pointer
+                next_pointer = None
+                if isinstance(payload, dict):
+                    next_pointer = str(payload.get("nextOffset") or "")
+                if not next_pointer or next_pointer == pointer:
+                    break
+                pointer = next_pointer
 
         return RootDiscovery(prefixes=sorted(prefixes), root_files=root_files)
+
+    def _filelist_folder_prefix(self, path: str, value: Any) -> str:
+        raw_prefix = str(value or "").strip("/")
+        if not raw_prefix:
+            return ""
+        current_prefix = path.strip("/")
+        if current_prefix and not raw_prefix.startswith(f"{current_prefix}/"):
+            raw_prefix = f"{current_prefix}/{raw_prefix}"
+        if path == "/" and "/" in raw_prefix:
+            raw_prefix = raw_prefix.split("/", 1)[0]
+        return f"{raw_prefix.rstrip('/')}/"
 
     async def _collect_root_files(
         self,
