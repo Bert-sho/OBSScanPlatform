@@ -1,228 +1,113 @@
 # Handoff
 
-## 环境
+## Timestamp
 
-- 更新时间：2026-07-09 08:04 CST；2026-07-09 后续恢复时确认 10 个任务均已完成
-- 工作目录：`/Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform`
-- 分支：`codex/obs-scan-platform`
-- 主分支：`master`
-- Git 命令：`/opt/homebrew/bin/git`
-- Python：3.11.6
-- 远端分支：`origin/codex/obs-scan-platform`
-- Latest commit before final handoff update: `37b9808ecdf3c2eefecbbfa9c349482335432521`
-- Latest completed handoff commit: `90e5c01f2f8a2a2cae319abddc629e2895d79627`
-- Latest commit after this resume: 本文档提交后的实际 SHA 需以 `git rev-parse HEAD` 为准，不能写入提交自身内容。
-- Uncommitted changes at final handoff completion: 无；分支已推送到 `origin/codex/obs-scan-platform`。本次恢复仅修正文档最终状态表述。
+2026-07-09 12:45 CST
 
-## 当前结论
+## Machine/environment
 
-OBS 扫描平台第一版 10 个计划任务已经完成。功能代码、测试、README 和交接文档均在 `codex/obs-scan-platform` 分支中维护；文档交接提交已经推送到 GitHub 远端分支。
+- Codex desktop app on macOS.
+- Worktree: `/Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform`
+- Branch: `codex/obs-scan-platform`
+- Git command: `/opt/homebrew/bin/git`
+- Python: 3.11.6
 
-## 提交时间线
+## Current branch
 
-| 顺序 | 提交 | 内容 |
-|---|---|---|
-| 1 | `f67348b chore: add Python project skeleton` | Python 项目骨架、包版本、Typer CLI 初始入口 |
-| 2 | `b602e43 fix: expose scan as CLI subcommand` | 修正 CLI 子命令暴露 |
-| 3 | `56a363b feat: add scan configuration loading` | 配置模型、示例 YAML、阈值解析、token 脱敏 |
-| 4 | `a586793 feat: add shared scan models and path helpers` | 共享扫描模型、路径工具 |
-| 5 | `38748a1 fix: harden path helpers and model tests` | 路径和模型测试加固 |
-| 6 | `29da720 feat: aggregate temporary object rows into directory CSV` | 临时对象 CSV 与目录汇总 CSV |
-| 7 | `3f4286b fix: harden object CSV aggregation tests` | CSV 聚合边界测试加固 |
-| 8 | `0bca24c feat: add async OBS request client` | async OBS client、请求编码、重试框架 |
-| 9 | `46e7bbd fix: tighten OBS client retry semantics` | 4xx 不重试、success=false 重试等语义修正 |
-| 10 | `951a2d4 feat: orchestrate OBS bucket scanning` | 扫描编排、应用/桶/目录扫描、manifest |
-| 11 | `5775f8e fix: correct OBS scanner request parameters` | 修正 OBS 接口参数 |
-| 12 | `d1ae746 fix: expose async run_scan API` | 暴露异步 `run_scan` |
-| 13 | `1e908c6 fix: harden scanner orchestration behavior` | 扫描编排行为加固 |
-| 14 | `aa2210a fix: normalize root pagination offset` | 根目录分页 offset 归一 |
-| 15 | `402409b feat: wire scan CLI command` | 接入 CLI scan 命令 |
-| 16 | `417d284 test: update CLI skeleton expectations` | 更新 CLI 骨架测试 |
-| 17 | `cd17847 test: cover scan CLI execution paths` | 覆盖 CLI 成功和失败路径 |
-| 18 | `9aae95e feat: add FastAPI management endpoints` | FastAPI 管理接口初版 |
-| 19 | `d5672c0 fix: harden API management endpoints` | API 路径安全、202、配置环境变量、行为测试 |
-| 20 | `cb55135 test: cover API path traversal variants` | appid/bucket_name 路径穿越回归测试、run symlink 防护 |
-| 21 | `e576a7b fix: ignore symlinked run manifests` | 忽略 symlink manifest |
-| 22 | `37b9808 test: add mocked end-to-end scan validation` | mocked OBS 端到端扫描测试、README 用法 |
-| 23 | `90e5c01 docs: update project handoff status` | 写入 10 个任务的项目级交接状态并推送 |
+`codex/obs-scan-platform`
 
-## 任务详情
+## Latest commit before this session
 
-### Task 1: Project Skeleton
+`897549b7d19777fcbf2bbe08fff3b3a9dda89e0a` (`docs: add scan start guide`)
 
-- 状态：已完成。
-- 产物：`pyproject.toml`、`README.md`、`src/obs_scan_platform/__init__.py`、基础 CLI、项目骨架测试。
-- 说明：建立 `src/` 布局、依赖、pytest 配置和 `obs-scan` entry point。
+## Latest commit after this session
 
-### Task 2: Configuration Loading
+The commit containing this handoff cannot include its own final SHA. After commit, run:
 
-- 状态：已完成。
-- 产物：`src/obs_scan_platform/config.py`、`config/apps.example.yaml`、`tests/test_config.py`。
-- 说明：实现扫描配置、默认阈值、桶级阈值覆盖、enabled application 过滤、masked config。
-
-### Task 3: Shared Models and Paths
-
-- 状态：已完成。
-- 产物：`models.py`、`paths.py`、模型与路径测试。
-- 说明：定义 bucket、object row、directory stats、scan status、object key 归一化、目录链和安全文件名。
-
-### Task 4: CSV Aggregation
-
-- 状态：已完成。
-- 产物：`csv_store.py`、`aggregation.py`、聚合测试。
-- 说明：临时 CSV 存对象级扫描结果；最终 CSV 只输出目录级统计，包括对象数量、总大小、最大文件、空文件、大文件、inactive 标记。
-
-### Task 5: Async OBS Client
-
-- 状态：已完成。
-- 产物：`obs_client.py`、OBS client 测试。
-- 说明：实现 async httpx client 包装、base64 JSON requestbody、object key 编码、全局 semaphore、503/失败响应重试和 4xx 快速失败。
-
-### Task 6: Scanner Orchestration
-
-- 状态：已完成。
-- 产物：`scanner.py`、`logging_config.py`、扫描器测试。
-- 说明：实现应用并发、桶并发、全局请求并发；listbuckets 过滤共享桶；bucket endpoint；root filelist 翻完整根目录；根文件 metadata；prefix objectkeys；manifest；temp 目录清理。
-
-### Task 7: CLI Scanner
-
-- 状态：已完成。
-- 产物：`cli.py`、CLI 测试。
-- 说明：`obs-scan scan --config ...` 可运行扫描，支持 `--appid` 和 `--run-id`，失败时返回非 0。
-
-### Task 8: FastAPI Management API
-
-- 状态：已完成。
-- 产物：`api.py`、API 测试。
-- 路由：
-  - `GET /health`
-  - `GET /config/apps`
-  - `POST /runs`
-  - `GET /runs`
-  - `GET /runs/{run_id}`
-  - `GET /runs/{run_id}/logs`
-  - `GET /runs/{run_id}/apps/{appid}/buckets/{bucket_name}/csv`
-- 安全加固：
-  - 拒绝 `.`、`..`、`/`、`\` 路径片段。
-  - 使用 `resolve().relative_to()` 限制结果路径边界。
-  - `/runs` 列表跳过 symlink run 目录和 symlink manifest。
-  - `POST /runs` 返回 202，运行中返回 409。
-
-### Task 9: End-to-End Validation With Mocked OBS
-
-- 状态：已完成。
-- 产物：`tests/test_scan_end_to_end.py`、README 更新。
-- 说明：测试通过 mocked OBS client 跑真实 `Scanner.run(run_id="run-1")`，验证 owned/shared bucket、filelist、metadata、objectkeys、最终 CSV、manifest、temp 清理。
-- 注意：新增测试首次运行即通过，因为已有 scanner 实现已覆盖目标行为；未改生产代码。
-
-### Task 10: Final Verification and Handoff
-
-- 状态：已完成。
-- 已完成：
-  - `pytest -v`
-  - `obs-scan --help`
-  - `obs-scan scan --help`
-  - `python3 -c "from obs_scan_platform.api import app; print(app.title)"`
-  - 更新 `docs/current-task.md` 和 `docs/handoff.md`
-- 提交和推送：
-  - `90e5c01 docs: update project handoff status`
-  - 已推送到 `origin/codex/obs-scan-platform`
-
-## 验证证据
-
-最近一次完整验证：
-
-```text
-pytest -v
-65 passed, 1 warning in 0.44s
+```bash
+/opt/homebrew/bin/git rev-parse HEAD
 ```
 
-CLI 验证：
+## Summary of what changed
+
+The user asked to use Superpowers brainstorming for scanner changes. The design conversation is complete and the approved design has been written to:
 
 ```text
-obs-scan --help
-exit 0, shows scan command
-
-obs-scan scan --help
-exit 0, shows --config, --appid, --run-id
+docs/superpowers/specs/2026-07-09-obs-scan-filelist-progress-config-design.md
 ```
 
-API import 验证：
+This session did not implement production code changes. It only wrote the design spec and updated handoff docs.
 
-```text
-python3 -c "from obs_scan_platform.api import app; print(app.title)"
-OBS Scan Platform
+## Important decisions and rationale
+
+- Chosen approach: approach A.
+- `filelist` recursively discovers directories and direct files in expanded directories.
+- `objectkeys` remains the final object collection method for unexpanded directory prefixes.
+- Direct files returned by expanded `filelist` directories must use `metadata` to get exact byte size.
+- `filelist_depth` defaults to `5`.
+- `filelist_task_limit_per_bucket` defaults to `100`.
+- When task limit is reached, newly discovered child directories become `objectkeys` prefixes so scanning does not miss objects.
+- CLI scans show `tqdm`; FastAPI scans do not.
+- `scan.log` records `completed` and `total` filelist progress and per-bucket elapsed seconds.
+- Empty buckets, including buckets with only empty folders, succeed and write header-only final CSVs.
+- `success=false` OBS responses remain errors.
+- Top-level `endpoint` is preferred, with application-level endpoint fallback for compatibility.
+- `scan_shared_buckets` is application-level and defaults to `false`.
+
+## Failed attempts or rejected approaches
+
+- Rejected replacing `objectkeys` with recursive `filelist + metadata` for all objects because it can create too many metadata requests on very large buckets.
+- Rejected a broad scan pipeline refactor because the current issues can be solved with focused scanner/config changes.
+- Visual companion was not used because the topic is backend scanning behavior and configuration, not a visual/UI design problem.
+
+## Current test/build status
+
+Validation performed for the design artifact:
+
+```bash
+rg -n "TBD|TODO|FIXME|\\?\\?|placeholder|待定|TODO" docs/superpowers/specs/2026-07-09-obs-scan-filelist-progress-config-design.md
 ```
 
-已知 warning：
+Result: no matches.
 
-```text
-StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated
+Before committing, rerun:
+
+```bash
+/opt/homebrew/bin/git diff --check
 ```
 
-该 warning 来自 FastAPI/Starlette 测试客户端依赖，不是本项目测试失败。
+No full pytest run is required for this design-only commit, but implementation work must use TDD and run the relevant test suite.
 
-## 当前文件和入口
+## Uncommitted changes
 
-- 配置示例：`config/apps.example.yaml`
-- CLI：`obs-scan scan --config config/apps.yaml`
-- API：`OBS_SCAN_CONFIG=config/apps.yaml uvicorn obs_scan_platform.api:app --reload`
-- 结果目录：`results/<run_id>/`
-- 每桶最终 CSV：`results/<run_id>/<appid>/<bucket>.csv`
-- run manifest：`results/<run_id>/manifest.json`
-- run log：`results/<run_id>/scan.log`
+Expected uncommitted files before commit:
 
-## 剩余风险和后续工作
+- `docs/superpowers/specs/2026-07-09-obs-scan-filelist-progress-config-design.md`
+- `docs/current-task.md`
+- `docs/handoff.md`
 
-- 首版没有数据库；后续需要把应用配置、run manifest、桶结果索引和 CSV 元数据迁移到数据库。
-- 首版 API 的 active scan guard 是单进程内存锁；多 worker 部署前需要跨进程锁。
-- mocked OBS 测试不能替代真实 OBS 联调，需要在非生产桶验证接口字段、限流和分页行为。
-- 配置文件中不能提交真实 `apptoken`。
+No production code should be modified at this stage.
 
-## 恢复步骤
+## Exact resume instructions
 
-如果需要继续工作：
-
-1. 进入 worktree：
+1. Enter the worktree:
 
 ```bash
 cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
 ```
 
-2. 检查分支和状态：
+2. Check status:
 
 ```bash
 /opt/homebrew/bin/git status --short --branch
-/opt/homebrew/bin/git log --oneline --decorate --max-count=10
 ```
 
-3. 重新运行验证：
+3. Review the spec:
 
 ```bash
-pytest -v
-obs-scan --help
-obs-scan scan --help
-python3 -c "from obs_scan_platform.api import app; print(app.title)"
+sed -n '1,260p' docs/superpowers/specs/2026-07-09-obs-scan-filelist-progress-config-design.md
 ```
 
-4. 清理本地测试缓存并复查 diff：
+4. If the user approves the spec, invoke Superpowers `writing-plans` and create an implementation plan. Do not implement before approval.
 
-```bash
-rm -rf .pytest_cache src/obs_scan_platform/__pycache__ tests/__pycache__
-/opt/homebrew/bin/git status --short --branch
-/opt/homebrew/bin/git diff --stat
-/opt/homebrew/bin/git diff -- docs/current-task.md docs/handoff.md
-```
-
-5. 若交接文档仍是未提交的有意修改，提交文档：
-
-```bash
-/opt/homebrew/bin/git add docs/current-task.md docs/handoff.md
-/opt/homebrew/bin/git commit -m "docs: update project handoff status"
-```
-
-6. 推送当前分支：
-
-```bash
-/opt/homebrew/bin/git push origin codex/obs-scan-platform
-```
+5. If the user requests changes, update the spec, rerun placeholder and diff checks, then recommit.
