@@ -226,11 +226,45 @@ class SharedBucketOBSClient(FakeOBSClient):
 
         if url.endswith("/rest/s3/bucket/filelist"):
             request_body = _decode_base64_json(params["requestbody"])
-            assert request_body["path"] == "/"
             if request_body["id"] == "owned-id":
                 return {"result": {"files": [], "nextOffset": ""}}
             assert request_body["id"] == "reader-shared-id"
+            if request_body["path"] == "/":
+                return {
+                    "result": {
+                        "files": [
+                            {"objectType": "folder", "objectKey": "reader-shared-prefix/"},
+                        ],
+                        "nextOffset": "",
+                    }
+                }
+            assert request_body["path"] == "/reader-shared-prefix/"
             return {"result": {"files": [], "nextOffset": ""}}
+
+        if url.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
+            objectkey = _decode_base64_text(params["objectkey"])
+            if params["bucketid"] == "owned-bucket":
+                assert params["bucketld"] == "owned-id"
+                assert objectkey == "/owned-prefix/"
+                return {
+                    "result": {
+                        "objectkeys": [
+                            {"objectKey": "owned-prefix/child.txt", "size": "5", "lastModifyTime": "2000"},
+                        ],
+                        "truncated": "false",
+                    }
+                }
+            assert params["bucketid"] == "reader-shared-bucket"
+            assert params["bucketld"] == "reader-shared-id"
+            assert objectkey == "/reader-shared-prefix/"
+            return {
+                "result": {
+                    "objectkeys": [
+                        {"objectKey": "reader-shared-prefix/child.txt", "size": "5", "lastModifyTime": "2000"},
+                    ],
+                    "truncated": "false",
+                }
+            }
 
         raise AssertionError(f"unexpected OBS URL: {url}")
 
@@ -391,3 +425,20 @@ async def test_scanner_run_includes_non_owner_shared_bucket_when_enabled(tmp_pat
         "owned-bucket",
         "reader-shared-bucket",
     ]
+
+    fake_client = FakeOBSClient.instances[0]
+    endpoint_calls = [call for call in fake_client.calls if call["url"].endswith("/rest/s3/bucket/endpoint")]
+    filelist_calls = [call for call in fake_client.calls if call["url"].endswith("/rest/s3/bucket/filelist")]
+    objectkeys_calls = [
+        call for call in fake_client.calls if call["url"].endswith("/rest/boto3/s3/list/bucket/objectkeys")
+    ]
+    assert any(call["params"]["bucketid"] == "reader-shared-bucket" for call in endpoint_calls)
+    assert any(
+        _decode_base64_json(call["params"]["requestbody"])["id"] == "reader-shared-id"
+        for call in filelist_calls
+    )
+    assert any(
+        call["params"]["bucketid"] == "reader-shared-bucket"
+        and call["params"]["bucketld"] == "reader-shared-id"
+        for call in objectkeys_calls
+    )

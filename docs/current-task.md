@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Task 3: Shared Bucket Selection
+Task 3 review fix: shared bucket downstream coverage
 
 ## Current branch
 
@@ -14,30 +14,21 @@ Task 3: Shared Bucket Selection
 
 ## User goal
 
-Implement Task 3 shared bucket selection for the OBS scan platform:
-
-- include scan-capable non-owner shared buckets when `scan_shared_buckets=true`
-- keep owned-only selection when `scan_shared_buckets=false`
-- skip buckets missing required fields (`id`, `name`, `vendor`, `region`) with safe warning logs
-- preserve sanitized logging constraints and existing request interfaces
+Close the Task 3 review finding by proving the non-owner shared bucket reaches downstream endpoint, filelist, and objectkeys requests when `scan_shared_buckets=true`.
 
 ## Completed work
 
-- Replaced the bucket-selection unit test with coverage for owned, owner-shared, non-owner shared, and missing-field buckets.
-- Added a `_list_buckets()` warning test that proves incomplete shared buckets are skipped with a safe log message that does not contain tokens.
-- Added an end-to-end scanner run test proving `scan_shared_buckets=true` includes a non-owner shared bucket in the manifest.
-- Added `is_scan_capable_bucket()` and updated `should_scan_bucket()` so shared scans include all scan-capable buckets while non-shared scans remain owned-only.
-- Logged `bucket skipped ... reason=missing_required_fields` for incomplete bucket records in `_list_buckets()`.
-- Updated `docs/current-task.md`, `docs/handoff.md`, and `.superpowers/sdd/task-3-report.md` for cross-machine handoff.
+- Strengthened `tests/test_scan_end_to_end.py` so the shared-bucket stub now returns a folder prefix that forces the scanner into `/rest/boto3/s3/list/bucket/objectkeys`.
+- Added an objectkeys branch for `SharedBucketOBSClient` so the shared bucket returns a simple object response instead of stopping at filelist.
+- Updated the shared-bucket end-to-end test to assert manifest inclusion plus downstream endpoint, filelist, and objectkeys calls for `reader-shared-bucket`.
+- Updated `docs/current-task.md`, `docs/handoff.md`, and `.superpowers/sdd/task-3-report.md` for the review fix handoff.
 
 ## Remaining work
 
-- None for Task 3.
+- None. The review fix is complete and the strengthened test passes.
 
 ## Key files changed
 
-- `src/obs_scan_platform/scanner.py`
-- `tests/test_scanner.py`
 - `tests/test_scan_end_to_end.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
@@ -45,13 +36,14 @@ Implement Task 3 shared bucket selection for the OBS scan platform:
 
 ## Validation commands run
 
-- `pytest tests/test_scanner.py::test_should_scan_bucket_includes_scan_capable_shared_buckets_when_enabled tests/test_scanner.py::test_list_buckets_logs_skip_for_missing_required_shared_bucket -v` (RED)
-- `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v` (GREEN)
+- `pytest tests/test_scan_end_to_end.py::test_scanner_run_includes_non_owner_shared_bucket_when_enabled -v`
+- `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`
+- `/opt/homebrew/bin/git diff --check`
 
 ## Validation result
 
-- RED: the targeted Task 3 command failed in the expected way because `should_scan_bucket()` still excluded the non-owner shared bucket and `_list_buckets()` returned `[]` instead of `["reader-bucket"]`.
-- GREEN: `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v` passed with `27 passed`.
+- GREEN: the strengthened shared-bucket end-to-end test passed, and the scanner test suite passed with `27 passed`.
+- `git diff --check` is clean.
 
 ## Known risks
 
@@ -59,4 +51,4 @@ Implement Task 3 shared bucket selection for the OBS scan platform:
 
 ## Next recommended action
 
-- Continue with the next task in `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md` from the current pushed branch head. Confirm the exact SHA with `git rev-parse HEAD`.
+- No additional code work is required for Task 3. Confirm the final branch head with `git rev-parse HEAD` before handing off.
