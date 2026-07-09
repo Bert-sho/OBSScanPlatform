@@ -21,7 +21,16 @@
 
 ## Latest commit after this session
 
-`75b42c5e875afa7352be944056364097ba872973` (docs: finalize task 1 handoff state)
+Task 1 implementation commit:
+
+`3ac8dc7c01f083756ba5105a17a702fdbfc44c65` (`fix: update scan concurrency config defaults`)
+
+Task 1 handoff review-fix commits:
+
+- `435f625abd0cfb345f6dd5c6e239be31754da0bf` (`docs: fix task 1 handoff state`)
+- `d07bc5da4bf31ab6f1ce3ee91e5fb0bb2408c551` (`docs: finalize task 1 handoff state`)
+
+The final branch HEAD is authoritative; verify it with `/opt/homebrew/bin/git rev-parse HEAD`.
 
 ## Summary of what changed
 
@@ -52,7 +61,7 @@
 
 ## Uncommitted changes
 
-- None expected after this review-fix commit.
+- None expected after the Task 1 review-fix commits.
 
 ## Exact resume instructions
 
