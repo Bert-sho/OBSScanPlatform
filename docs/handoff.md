@@ -29,6 +29,7 @@ Task 1 handoff review-fix commits:
 
 - `435f625abd0cfb345f6dd5c6e239be31754da0bf` (`docs: fix task 1 handoff state`)
 - `d07bc5da4bf31ab6f1ce3ee91e5fb0bb2408c551` (`docs: finalize task 1 handoff state`)
+- `42afe7eb0a26813ee485bc5920864450d25f8c87` (`docs: clarify task 1 handoff commits`)
 
 The final branch HEAD is authoritative; verify it with `/opt/homebrew/bin/git rev-parse HEAD`.
 
