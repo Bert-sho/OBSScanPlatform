@@ -21,21 +21,19 @@
 
 ## Latest commit after this session
 
-Pending the Task 2 implementation commit:
+`fix: cover sanitized connection errors`
 
-- commit message: `fix: sanitize OBS request errors`
-- branch: `codex/obs-scan-platform`
-
-After the commit is created, treat the final branch HEAD as authoritative and verify it with `/opt/homebrew/bin/git rev-parse HEAD`.
+Treat the final branch HEAD as authoritative and verify it with `/opt/homebrew/bin/git rev-parse HEAD`.
 
 ## Summary of what changed
 
 - Added OBS client regression tests for sanitized 404, 503-after-retry, and `success=false` errors, and updated the old 404 test to expect `OBSRequestError`.
+- Added a focused connect-error sanitization regression test that proves raw URLs, query strings, encoded bodies, and tokens stay out of the final error string while the reason falls back to `ConnectError`.
 - Reworked `OBSRequestError` to carry `endpoint`, `status_code`, and `reason` and format a sanitized failure message.
 - Sanitized HTTP and JSON failure reasons so raw URLs, query strings, encoded bodies, and tokens are not included in default error strings.
 - Preserved retry behavior: HTTP 4xx fail fast; HTTP 5xx and OBS `success=false` continue retrying through `max_retries`.
 - Passed endpoint labels from scanner OBS call sites and updated fake test clients in scanner-oriented tests.
-- Updated `docs/current-task.md` and this handoff for Task 2.
+- Updated `docs/current-task.md`, `docs/handoff.md`, and the Task 2 report for the review-fix pass.
 
 ## Important decisions and rationale
 
@@ -56,11 +54,10 @@ After the commit is created, treat the final branch HEAD as authoritative and ve
 - GREEN evidence: `pytest tests/test_obs_client.py -v`: 10 passed
 - `pytest tests/test_scanner.py -v`: 23 passed
 - `pytest tests/test_scan_end_to_end.py -v`: 2 passed
-
-## Uncommitted changes
-
-- Before the final Task 2 commit: modified `src/obs_scan_platform/obs_client.py`, `src/obs_scan_platform/scanner.py`, `tests/test_obs_client.py`, `tests/test_scanner.py`, `tests/test_scan_end_to_end.py`, `docs/current-task.md`, and `docs/handoff.md`.
-- The task report `.superpowers/sdd/task-2-report.md` still needs to be written after the Task 2 commit, per the task brief.
+- Review-fix regression coverage is already green with the current production code; no production change was required for the new connect-error sanitization test.
+- `pytest tests/test_obs_client.py -v`: 11 passed
+- `/opt/homebrew/bin/git diff --check`: clean
+- `rg -n "Pending|ready to commit|needs to be written" docs/handoff.md`: no matches
 
 ## Exact resume instructions
 
@@ -77,7 +74,7 @@ git status --short --branch
 git rev-parse HEAD
 ```
 
-3. Confirm the Task 2 commit and report:
+3. Confirm the Task 2 report:
 
 ```text
 .superpowers/sdd/task-2-report.md

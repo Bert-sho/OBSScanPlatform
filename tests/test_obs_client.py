@@ -215,6 +215,39 @@ async def test_get_json_503_error_after_retries_is_sanitized():
 
 
 @pytest.mark.asyncio
+async def test_get_json_connect_error_is_sanitized():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connect boom https://obs.example/path?token=secret-token")
+
+    client = OBSClient(
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
+        request_semaphore=asyncio.Semaphore(1),
+        max_retries=0,
+        retry_base_delay_seconds=0,
+        retry_max_delay_seconds=0,
+    )
+
+    try:
+        with pytest.raises(OBSRequestError) as exc_info:
+            await client.get_json(
+                "http://obs.example/test?token=secret-token",
+                params={"requestbody": "encoded-secret-body"},
+                endpoint="metadata",
+            )
+    finally:
+        await client.close()
+
+    message = str(exc_info.value)
+    assert "endpoint=metadata" in message
+    assert "status=unknown" in message
+    assert "reason=ConnectError" in message
+    assert "obs.example" not in message
+    assert "secret-token" not in message
+    assert "encoded-secret-body" not in message
+    assert "connect boom" not in message
+
+
+@pytest.mark.asyncio
 async def test_get_json_success_false_error_is_sanitized():
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"success": False, "msg": "permission denied"})

@@ -24,12 +24,13 @@ Implement Task 2 sanitized OBS request errors for the OBS scan platform:
 ## Completed work
 
 - Added sanitized OBS client regression tests for 404, 503-after-retry, and `success=false` error cases.
+- Added a focused connect-error sanitization regression test that proves raw URLs, tokens, and request bodies stay out of the final error string while the reason falls back to `ConnectError`.
 - Updated the existing 404 behavior test to expect `OBSRequestError` instead of `httpx.HTTPStatusError`.
 - Implemented structured `OBSRequestError(endpoint, status_code, reason)` in `src/obs_scan_platform/obs_client.py`.
 - Sanitized HTTP and JSON failure reasons so default request failures no longer include raw request URLs, tokens, or encoded bodies.
-- Preserved retry behavior: HTTP 4xx fails fast, HTTP 5xx retries, OBS JSON `success=false` retries through `max_retries`.
+- Preserved retry behavior: HTTP 4xx fails fast, HTTP 5xx retries, and OBS JSON `success=false` retries through `max_retries`.
 - Passed endpoint labels from scanner OBS call sites and updated fake test clients to accept the new keyword argument.
-- Updated `docs/current-task.md` and `docs/handoff.md` for Task 2.
+- Updated `docs/current-task.md`, `docs/handoff.md`, and the Task 2 report for the review-fix pass.
 
 ## Remaining work
 
@@ -44,6 +45,7 @@ Implement Task 2 sanitized OBS request errors for the OBS scan platform:
 - `tests/test_scan_end_to_end.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
+- `.superpowers/sdd/task-2-report.md`
 
 ## Validation commands run
 
@@ -51,6 +53,9 @@ Implement Task 2 sanitized OBS request errors for the OBS scan platform:
 - `pytest tests/test_obs_client.py -v` (GREEN)
 - `pytest tests/test_scanner.py -v`
 - `pytest tests/test_scan_end_to_end.py -v`
+- `pytest tests/test_obs_client.py -v` (review-fix regression pass, 11/11 green)
+- `/opt/homebrew/bin/git diff --check`
+- `rg -n "Pending|ready to commit|needs to be written" docs/handoff.md`
 
 ## Validation result
 
@@ -58,6 +63,10 @@ Implement Task 2 sanitized OBS request errors for the OBS scan platform:
 - GREEN: `pytest tests/test_obs_client.py -v` passed with 10/10 tests green after the fix.
 - `pytest tests/test_scanner.py -v`: 23 passed
 - `pytest tests/test_scan_end_to_end.py -v`: 2 passed
+- Review-fix regression coverage is already green with the current production code; no production change was required for the new connect-error sanitization test.
+- `pytest tests/test_obs_client.py -v`: 11 passed
+- `git diff --check`: clean
+- `rg -n "Pending|ready to commit|needs to be written" docs/handoff.md`: no matches
 
 ## Known risks
 
@@ -66,4 +75,4 @@ Implement Task 2 sanitized OBS request errors for the OBS scan platform:
 
 ## Next recommended action
 
-- Continue with the next task in `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md`, starting from the current branch head after confirming push status.
+- Continue with the next task in `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md` from the current branch head; Task 2 review findings are closed.
