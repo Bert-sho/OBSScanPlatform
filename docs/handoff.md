@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-09 23:39 CST
+2026-07-10 00:14 CST
 
 ## Machine/environment
 
@@ -17,53 +17,52 @@
 
 ## Latest commit before this session
 
-`be02a8c50d39163f9187bdf0a1a7642a83f78a14` (`docs: record task 1 reviewed head`)
+`142b2b1cb312c55344a351940148557cfb9d80db`
 
 ## Latest commit after this session
 
-`d00de9cfd65723441149266a2f12efb6068a2727` (`fix: sanitize OBS request errors`)
-`6038f97753632549b2ceb2c89c5b9ff907a9b200` (`fix: cover sanitized connection errors`)
-`7b7f172202f6e19019cdd7570e5636c31a0e0d6e` (`docs: record task 2 commits`)
-`95ed3cddf653eefccf6abf2f3869d66310a92f6a` (`fix: sanitize non-json OBS error bodies`)
-`a47f2b5d7836f7f67e4ae8b8f919c3effd033414` (`docs: update Task 2 handoff`)
+Current branch HEAD after the Task 3 commit (`fix: include scan-capable shared buckets`). Confirm with:
 
-Treat the final branch HEAD as authoritative and verify it with `/opt/homebrew/bin/git rev-parse HEAD`.
+```bash
+git rev-parse HEAD
+```
 
 ## Summary of what changed
 
-- Added OBS client regression tests for sanitized 404, 503-after-retry, and `success=false` errors, and updated the old 404 test to expect `OBSRequestError`.
-- Added a focused connect-error sanitization regression test that proves raw URLs, query strings, encoded bodies, and tokens stay out of the final error string while the reason falls back to `ConnectError`.
-- Added a non-JSON error-body regression test that proves upstream text/HTML failures are reduced to `Service Unavailable` instead of echoing the raw body or embedded request details.
-- Reworked `OBSRequestError` to carry `endpoint`, `status_code`, and `reason` and format a sanitized failure message.
-- Sanitized HTTP and JSON failure reasons so raw URLs, query strings, encoded bodies, and tokens are not included in default error strings, and non-JSON failures now fall back to `response.reason_phrase` or `HTTP {status_code}`.
-- Preserved retry behavior: HTTP 4xx fail fast; HTTP 5xx and OBS `success=false` continue retrying through `max_retries`.
-- Passed endpoint labels from scanner OBS call sites and updated fake test clients in scanner-oriented tests.
-- Updated `docs/current-task.md`, `docs/handoff.md`, and the Task 2 report for the review-fix pass.
+- Updated scanner bucket selection so `scan_shared_buckets=true` includes any scan-capable bucket, including non-owner shared buckets.
+- Preserved the owned-only behavior when `scan_shared_buckets=false`.
+- Added a scan-capability guard based on required bucket fields: `id`, `name`, `vendor`, and `region`.
+- Logged a safe warning for skipped incomplete buckets without including tokens or raw URLs.
+- Added unit and end-to-end regression coverage for shared bucket inclusion and incomplete shared bucket skipping.
+- Updated `docs/current-task.md` and `.superpowers/sdd/task-3-report.md` for handoff.
 
 ## Important decisions and rationale
 
-- `OBSRequestError` now exposes only safe endpoint/status/reason diagnostics to avoid accidental leakage of signed URLs, tokens, or encoded request bodies.
-- Timeout/connect failures fall back to the exception class name in the final sanitized error instead of `str(exc)` for the same reason.
-- Scanner call sites now pass stable endpoint labels (`listbuckets`, `bucket_endpoint`, `filelist`, `metadata`, `objectkeys`) so failed requests remain diagnosable without raw URL logging.
-- No FastAPI request parameters were changed, and no progress streaming was added.
-- The final bucket CSV schema was left alone.
-- Empty-bucket OBS failures were not converted into successful empty scans.
+- The new selection rule follows the Task 3 brief literally: when shared scanning is enabled, eligibility is based on scan-capable bucket fields rather than ownership.
+- I kept the implementation local to `src/obs_scan_platform/scanner.py` and test fixtures, with no FastAPI request shape changes and no CSV schema changes.
+- The skip log intentionally records only `appid`, bucket name (or `<missing>`), and `missing_required_fields` to stay inside the sanitized logging constraint.
+- I did not reinterpret OBS failures as successful empty scans; this task only changes selection and safe skip logging.
 
 ## Failed attempts or rejected approaches
 
-- The `requesting-code-review` skill expects a reviewer subagent, but the current session did not expose subagent review tools. I compensated with a manual diff review plus targeted validation runs.
+- The first GREEN run surfaced an older scanner test whose fixture contained a scan-capable `auth=reader` bucket. I updated the expectation to include that bucket instead of narrowing production logic, because the brief defines inclusion by scan capability when shared scanning is enabled.
+- The `requesting-code-review` skill expects a reviewer subagent, but this session did not expose that workflow. I compensated with manual diff review plus the task's RED/GREEN validation commands.
 
 ## Current test/build status
 
-- RED evidence: `pytest tests/test_obs_client.py -v` failed with 4 expected failures, all `TypeError: OBSClient.get_json() got an unexpected keyword argument 'endpoint'`.
-- GREEN evidence: `pytest tests/test_obs_client.py -v`: 10 passed
-- `pytest tests/test_scanner.py -v`: 23 passed
-- `pytest tests/test_scan_end_to_end.py -v`: 2 passed
-- Review-fix regression coverage is already green with the current production code; no production change was required for the new connect-error sanitization test.
-- `pytest tests/test_obs_client.py -v`: 11 passed
-- `pytest tests/test_obs_client.py -v`: 12 passed
-- `/opt/homebrew/bin/git diff --check`: clean
-- `rg -n "Pending|ready to commit|needs to be written" docs/handoff.md`: no matches
+- RED evidence: `pytest tests/test_scanner.py::test_should_scan_bucket_includes_scan_capable_shared_buckets_when_enabled tests/test_scanner.py::test_list_buckets_logs_skip_for_missing_required_shared_bucket -v`
+  - Result: 2 failed as expected
+  - Failure shape: `should_scan_bucket()` returned `False` for the non-owner shared bucket, and `_list_buckets()` returned `[]` instead of `["reader-bucket"]`
+- GREEN evidence: `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`
+  - Result: `27 passed`
+
+## Uncommitted changes, if any
+
+- None expected after the final Task 3 commit. Verify with:
+
+```bash
+git status --short --branch
+```
 
 ## Exact resume instructions
 
@@ -73,25 +72,23 @@ Treat the final branch HEAD as authoritative and verify it with `/opt/homebrew/b
 cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
 ```
 
-2. Check the branch and status:
+2. Confirm branch head and clean status:
 
 ```bash
 git status --short --branch
 git rev-parse HEAD
 ```
 
-3. Confirm the Task 2 report:
+3. Review the Task 3 report:
 
 ```text
-.superpowers/sdd/task-2-report.md
+.superpowers/sdd/task-3-report.md
 ```
 
-4. If resuming before push, run:
+4. If more work is requested on shared bucket behavior, re-run the focused scanner validation first:
 
 ```bash
-git status --short --branch
-git diff --stat
-git diff
+pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v
 ```
 
-5. Continue with the next behavior-corrections task from `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md`.
+5. Continue with the next item from `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md`.

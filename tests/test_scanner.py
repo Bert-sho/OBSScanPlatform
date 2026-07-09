@@ -116,16 +116,19 @@ def test_is_owned_bucket_excludes_shared_bucket():
     assert not is_owned_bucket(BucketInfo("3", "c", "HEC", "cn-east-3", "reader", None))
 
 
-def test_should_scan_bucket_includes_owned_and_optional_shared_buckets():
+def test_should_scan_bucket_includes_scan_capable_shared_buckets_when_enabled():
     owned = BucketInfo("1", "a", "HEC", "cn-east-3", "owner", None)
-    shared = BucketInfo("2", "b", "HEC", "cn-east-3", "owner", "other")
-    reader = BucketInfo("3", "c", "HEC", "cn-east-3", "reader", None)
+    owner_shared = BucketInfo("2", "b", "HEC", "cn-east-3", "owner", "other")
+    reader_shared = BucketInfo("3", "c", "HEC", "cn-east-3", "reader", "other")
+    missing_vendor = BucketInfo("4", "d", "", "cn-east-3", "reader", "other")
 
     assert should_scan_bucket(owned, include_shared=False)
+    assert not should_scan_bucket(owner_shared, include_shared=False)
+    assert not should_scan_bucket(reader_shared, include_shared=False)
     assert should_scan_bucket(owned, include_shared=True)
-    assert not should_scan_bucket(shared, include_shared=False)
-    assert should_scan_bucket(shared, include_shared=True)
-    assert not should_scan_bucket(reader, include_shared=True)
+    assert should_scan_bucket(owner_shared, include_shared=True)
+    assert should_scan_bucket(reader_shared, include_shared=True)
+    assert not should_scan_bucket(missing_vendor, include_shared=True)
 
 
 def test_parse_int_or_none_handles_dirty_values():
@@ -195,8 +198,48 @@ async def test_list_buckets_uses_global_endpoint_and_includes_shared_when_enable
 
     buckets = await scanner._list_buckets(application, client)
 
-    assert [bucket.name for bucket in buckets] == ["owned-bucket", "shared-bucket"]
+    assert [bucket.name for bucket in buckets] == ["owned-bucket", "shared-bucket", "reader-bucket"]
     assert client.calls[0]["url"].startswith("http://global-obs.example/")
+
+
+@pytest.mark.asyncio
+async def test_list_buckets_logs_skip_for_missing_required_shared_bucket(caplog: pytest.LogCaptureFixture):
+    scanner, application, _ = make_scanner()
+    application.scan_shared_buckets = True
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "buckets": [
+                        {
+                            "id": "reader-id",
+                            "name": "reader-bucket",
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "reader",
+                            "shareFrom": "other",
+                        },
+                        {
+                            "id": "bad-id",
+                            "name": "missing-region",
+                            "vendor": "HEC",
+                            "region": "",
+                            "auth": "reader",
+                            "shareFrom": "other",
+                        },
+                    ]
+                }
+            }
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING, logger="obs_scan_platform.scanner"):
+        buckets = await scanner._list_buckets(application, client)
+
+    assert [bucket.name for bucket in buckets] == ["reader-bucket"]
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("bucket skipped appid=app.one bucket=missing-region reason=missing_required_fields" in msg for msg in messages)
+    assert all("token" not in msg.lower() for msg in messages)
 
 
 @pytest.mark.asyncio

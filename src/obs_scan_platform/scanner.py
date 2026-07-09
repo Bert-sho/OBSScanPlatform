@@ -35,10 +35,16 @@ def is_owned_bucket(bucket: BucketInfo) -> bool:
     return bucket.auth == "owner" and bucket.share_from is None
 
 
+def is_scan_capable_bucket(bucket: BucketInfo) -> bool:
+    return bool(bucket.bucket_id and bucket.name and bucket.vendor and bucket.region)
+
+
 def should_scan_bucket(bucket: BucketInfo, include_shared: bool) -> bool:
-    if bucket.auth != "owner":
+    if not is_scan_capable_bucket(bucket):
         return False
-    return bucket.share_from is None or include_shared
+    if include_shared:
+        return True
+    return is_owned_bucket(bucket)
 
 
 def _now_ms() -> int:
@@ -200,6 +206,12 @@ class Scanner:
             )
             if should_scan_bucket(bucket, application.scan_shared_buckets):
                 buckets.append(bucket)
+            elif not is_scan_capable_bucket(bucket):
+                LOGGER.warning(
+                    "bucket skipped appid=%s bucket=%s reason=missing_required_fields",
+                    application.appid,
+                    bucket.name or "<missing>",
+                )
         return buckets
 
     async def _list_owned_buckets(self, application: ApplicationConfig, client: OBSClient) -> list[BucketInfo]:

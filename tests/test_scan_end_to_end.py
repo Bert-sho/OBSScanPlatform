@@ -181,6 +181,60 @@ class EmptyFolderOBSClient(FakeOBSClient):
         raise AssertionError(f"unexpected OBS URL: {url}")
 
 
+class SharedBucketOBSClient(FakeOBSClient):
+    async def get_json(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any],
+        headers: dict[str, str] | None = None,
+        endpoint: str = "unknown",
+    ) -> dict[str, Any]:
+        self.calls.append({"url": url, "params": params, "headers": headers})
+
+        if url.endswith("/rest/s3/listbuckets"):
+            return {
+                "result": {
+                    "buckets": [
+                        {
+                            "id": "owned-id",
+                            "name": "owned-bucket",
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "owner",
+                            "shareFrom": None,
+                        },
+                        {
+                            "id": "reader-shared-id",
+                            "name": "reader-shared-bucket",
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "reader",
+                            "shareFrom": "other-app",
+                        },
+                    ]
+                }
+            }
+
+        if url.endswith("/rest/s3/bucket/endpoint"):
+            if params["bucketid"] == "owned-bucket":
+                assert params["bucketUid"] == "owned-id"
+                return {"result": "https://owned-bucket.example/"}
+            assert params["bucketid"] == "reader-shared-bucket"
+            assert params["bucketUid"] == "reader-shared-id"
+            return {"result": "https://reader-shared-bucket.example/"}
+
+        if url.endswith("/rest/s3/bucket/filelist"):
+            request_body = _decode_base64_json(params["requestbody"])
+            assert request_body["path"] == "/"
+            if request_body["id"] == "owned-id":
+                return {"result": {"files": [], "nextOffset": ""}}
+            assert request_body["id"] == "reader-shared-id"
+            return {"result": {"files": [], "nextOffset": ""}}
+
+        raise AssertionError(f"unexpected OBS URL: {url}")
+
+
 @pytest.mark.asyncio
 async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path: Path, monkeypatch):
     FakeOBSClient.instances.clear()
@@ -302,3 +356,38 @@ async def test_scanner_run_succeeds_with_empty_folder_and_header_only_csv(tmp_pa
         rows = list(csv.reader(file))
     assert rows[0][0:3] == ["run_id", "appid", "bucket_name"]
     assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_scanner_run_includes_non_owner_shared_bucket_when_enabled(tmp_path: Path, monkeypatch):
+    FakeOBSClient.instances.clear()
+    monkeypatch.setattr("obs_scan_platform.scanner.httpx.AsyncClient", DummyAsyncClient)
+    monkeypatch.setattr("obs_scan_platform.scanner.OBSClient", SharedBucketOBSClient)
+
+    config = AppConfigFile(
+        endpoint="https://global-obs-api.example",
+        defaults=Thresholds(
+            large_directory_bytes=10,
+            large_file_bytes=10,
+            inactive_directory_days=30,
+        ),
+        applications=[
+            ApplicationConfig(
+                appid="app.one",
+                name="App One",
+                apptoken="token-1",
+                scan_shared_buckets=True,
+            )
+        ],
+    )
+    config.scan.results_dir = str(tmp_path / "results")
+    config.scan.keep_temp_files = True
+    config.scan.bucket_concurrency = 1
+
+    manifest = await Scanner(config).run(run_id="run-1")
+
+    assert manifest["status"] == "success"
+    assert [bucket["bucket_name"] for bucket in manifest["applications"][0]["buckets"]] == [
+        "owned-bucket",
+        "reader-shared-bucket",
+    ]
