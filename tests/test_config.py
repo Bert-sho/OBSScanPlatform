@@ -51,6 +51,79 @@ applications:
     assert config.thresholds_for(app_config, "bucket-missing").large_directory_bytes == 100
 
 
+def test_scan_settings_new_concurrency_defaults(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+scan: {}
+defaults:
+  large_directory_bytes: 100
+  large_file_bytes: 10
+  inactive_directory_days: 180
+applications:
+  - appid: app.one
+    name: App One
+    apptoken: replace-with-test-token
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+
+    assert config.scan.global_request_concurrency == 150
+    assert config.scan.objectkeys_concurrency_limit() == 30
+
+
+def test_legacy_per_bucket_prefix_concurrency_still_sets_objectkeys_limit(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+scan:
+  per_bucket_prefix_concurrency: 7
+defaults:
+  large_directory_bytes: 100
+  large_file_bytes: 10
+  inactive_directory_days: 180
+applications:
+  - appid: app.one
+    name: App One
+    apptoken: replace-with-test-token
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+
+    assert config.scan.objectkeys_concurrency_limit() == 7
+
+
+def test_new_objectkeys_concurrency_field_wins_over_legacy_field(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+scan:
+  per_bucket_prefix_concurrency: 7
+  objectkeys_concurrency_per_bucket: 13
+defaults:
+  large_directory_bytes: 100
+  large_file_bytes: 10
+  inactive_directory_days: 180
+applications:
+  - appid: app.one
+    name: App One
+    apptoken: replace-with-test-token
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+
+    assert config.scan.objectkeys_concurrency_limit() == 13
+
+
 def test_masked_config_hides_token(tmp_path: Path):
     config_file = tmp_path / "apps.yaml"
     config_file.write_text(

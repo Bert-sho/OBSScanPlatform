@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Plan: OBS scan behavior corrections implementation
+Task 1: Config Defaults and Objectkeys Concurrency Resolver
 
 ## Current branch
 
@@ -14,53 +14,55 @@ Plan: OBS scan behavior corrections implementation
 
 ## User goal
 
-Synchronize `AGENTS.md` from the repository `master` branch into `codex/obs-scan-platform`, then enter the next Superpowers step by writing an implementation plan for the approved scanner behavior corrections:
+Implement the Task 1 config changes for the OBS scan platform:
 
-- Default CLI and `scan.log` output must not print request links, query strings, bodies, or tokens.
-- Failed requests such as `404` and `503` must still log safe status/reason diagnostics.
-- `scan_shared_buckets: true` must scan scan-capable shared bucket entries.
-- Recursive `filelist` scheduling must process whole levels; the task limit is a deeper-recursion threshold, not a hard cap for the current level.
-- A bucket must finish all `filelist` discovery and metadata collection before any `objectkeys` collection starts.
-- Default global request concurrency should be `150`.
-- Default per-bucket `objectkeys` concurrency should be `30`.
+- set `scan.global_request_concurrency` default to `150`
+- set per-bucket objectkeys concurrency default to `30`
+- keep `scan.per_bucket_prefix_concurrency` accepted for legacy YAML configs
+- add `ScanSettings.objectkeys_concurrency_limit()`
+- update sample config and operator docs
 
 ## Completed work
 
-- Fetched `origin/master`.
-- Restored `AGENTS.md` from `origin/master` into the current `codex/obs-scan-platform` branch.
-- Used the Superpowers writing-plans workflow.
-- Added `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md`.
-- Mapped the implementation across config, OBS client, filelist discovery, scanner phase ordering, docs, and tests.
-- Self-reviewed the plan for spec coverage, draft markers, and interface consistency.
+- Added three config regression tests covering the new defaults, legacy compatibility, and precedence between new and old fields.
+- Implemented `ScanSettings.objectkeys_concurrency_limit()` in `src/obs_scan_platform/config.py`.
+- Updated `ScanSettings` defaults so `global_request_concurrency` defaults to `150`.
+- Added the new `objectkeys_concurrency_per_bucket` field while preserving `per_bucket_prefix_concurrency`.
+- Switched scanner objectkeys worker sizing to use the new resolver.
+- Updated `config/apps.example.yaml` to show the new recommended settings.
+- Updated `docs/scan-start-guide.md` to explain the new per-bucket objectkeys concurrency guidance.
 
 ## Remaining work
 
-- Choose an execution mode for the plan.
-- Implement the plan task by task, preferably with `superpowers:subagent-driven-development`.
-- Run targeted tests and the full test suite during implementation.
+- None for Task 1.
 
 ## Key files changed
 
-- `AGENTS.md`
-- `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md`
-- `docs/current-task.md`
+- `src/obs_scan_platform/config.py`
+- `src/obs_scan_platform/scanner.py`
+- `tests/test_config.py`
+- `config/apps.example.yaml`
+- `docs/scan-start-guide.md`
 - `docs/handoff.md`
+- `.superpowers/sdd/task-1-report.md`
 
 ## Validation commands run
 
-- `rg -n 'T''BD|TO''DO|implement ''later|fill in ''details|appropriate ''error handling|Write tests for the ''above|Similar ''to|\\?\\?|pend''ing|may''be|should ''choose' docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md`
-- `/opt/homebrew/bin/git diff --check`
+- `pytest tests/test_config.py -v`
+- `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`
+- `pytest -q`
 
 ## Validation result
 
-- No unresolved draft markers were found in the implementation plan or design spec.
-- `git diff --check` passed.
+- `pytest tests/test_config.py -v`: 9 passed
+- `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`: 25 passed
+- `pytest -q`: 84 passed, 1 warning
 
 ## Known risks
 
-- No production scanner code has been changed yet; the listed behavior gaps remain until the implementation plan is executed.
-- The design intentionally leaves bad empty-bucket OBS interface responses as real failures because the user deferred that issue.
+- `per_bucket_prefix_concurrency` is still accepted, but the new resolver now centralizes the decision in `ScanSettings`. If future scan phases need different per-bucket concurrency, they should use the resolver rather than the raw field.
+- The full suite reported one existing `StarletteDeprecationWarning`; it did not block the task.
 
 ## Next recommended action
 
-Execute `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md` using Subagent-Driven development unless the user chooses Inline Execution.
+- Commit and push the Task 1 changes, then pick up the next approved task in the plan.

@@ -12,14 +12,22 @@ class ScanSettings(BaseModel):
     page_size: int = 1000
     app_concurrency: int = 2
     bucket_concurrency: int = 4
-    global_request_concurrency: int = 50
-    per_bucket_prefix_concurrency: int = 8
+    global_request_concurrency: int = 150
+    per_bucket_prefix_concurrency: int | None = None
+    objectkeys_concurrency_per_bucket: int | None = None
     metadata_concurrency_per_bucket: int = 8
     request_timeout_seconds: int = 30
     max_retries: int = 5
     retry_base_delay_seconds: float = 2
     retry_max_delay_seconds: float = 60
     filelist_task_limit_per_bucket: int = 100
+
+    def objectkeys_concurrency_limit(self) -> int:
+        if self.objectkeys_concurrency_per_bucket is not None:
+            return self.objectkeys_concurrency_per_bucket
+        if self.per_bucket_prefix_concurrency is not None:
+            return self.per_bucket_prefix_concurrency
+        return 30
 
 
 class Thresholds(BaseModel):

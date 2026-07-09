@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-09 19:49 CST
+2026-07-09 20:17 CST
 
 ## Machine/environment
 
@@ -17,56 +17,42 @@
 
 ## Latest commit before this session
 
-`872e2778699d426f8b2ab05fa9cae5c110058ed5` (`docs: add scan behavior corrections design`)
+`bde98bf232a1fe83ec50793c0a1e7006929b94c3`
 
 ## Latest commit after this session
 
-This session creates a docs-only planning commit. The final immutable commit hash is reported in the Codex final response after commit and push.
+Pending the Task 1 commit created in this session.
 
 ## Summary of what changed
 
-- Fetched `origin/master`.
-- Restored `AGENTS.md` from `origin/master` into `codex/obs-scan-platform`.
-- Added `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md`.
-- Updated `docs/current-task.md` for the implementation planning task.
-- Updated this handoff for the next Codex session.
-- No production scanner code or tests were edited in this session.
+- Added config regression tests for the new concurrency defaults and the legacy-to-new objectkeys resolver.
+- Implemented `ScanSettings.objectkeys_concurrency_limit()` and updated the scan defaults in `src/obs_scan_platform/config.py`.
+- Updated scanner objectkeys worker sizing to call the new resolver.
+- Refreshed the sample YAML and scan-start guide to document the new recommended defaults.
+- Updated `docs/current-task.md` and this handoff for Task 1.
 
 ## Important decisions and rationale
 
-- The user asked to sync `AGENTS.md` from the repository `master` branch before moving to the next step.
-- The next Superpowers step after the approved design is writing-plans, so this session stayed in planning mode.
-- Request links, query strings, request bodies, and tokens must not appear in default terminal logs or `scan.log`.
-- Failed requests such as `404` and `503` must still be logged with sanitized endpoint/status/reason details.
-- Bad empty-bucket OBS interface responses are explicitly out of scope for now.
-- `scan_shared_buckets: true` should include scan-capable shared listbuckets entries even when `auth` is not `owner`.
-- `filelist_task_limit_per_bucket` is a target threshold for deciding whether to recurse deeper, not a hard cap on the current level.
-- Each bucket must complete all filelist discovery and metadata collection before starting objectkeys collection.
-- Default request concurrency should be raised to `150` globally, with `objectkeys` per-bucket concurrency defaulting to `30`.
-- The plan preserves existing OBS `success=false` retry behavior while sanitizing raised error messages.
+- `global_request_concurrency` now defaults to `150` so the system has the higher default requested in the task brief.
+- `objectkeys_concurrency_per_bucket` is the new preferred field; `per_bucket_prefix_concurrency` remains accepted for compatibility.
+- The scanner now reads concurrency through `ScanSettings.objectkeys_concurrency_limit()` so the legacy and new settings resolve in one place.
+- No FastAPI request parameters were changed, and no progress streaming was added.
+- The final bucket CSV schema was left alone.
+- Empty-bucket OBS failures were not converted into successful empty scans.
 
 ## Failed attempts or rejected approaches
 
-- No code attempts were made.
-- The plan initially had a nested markdown/yaml code block that could render poorly; it was simplified before commit.
-- The plan initially risked changing OBS `success=false` retry behavior; it was corrected to retry `success=false` and only fail fast on HTTP `4xx`.
+- None. The task followed the requested red-green flow cleanly.
 
 ## Current test/build status
 
-Docs-only planning validation:
-
-```bash
-rg -n 'T''BD|TO''DO|implement ''later|fill in ''details|appropriate ''error handling|Write tests for the ''above|Similar ''to|\\?\\?|pend''ing|may''be|should ''choose' docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md docs/superpowers/specs/2026-07-09-obs-scan-behavior-corrections-design.md
-/opt/homebrew/bin/git diff --check
-```
-
-Result: both checks passed.
-
-Full Python tests were not run because this session only syncs `AGENTS.md`, adds an implementation plan, and updates handoff docs.
+- `pytest tests/test_config.py -v`: 9 passed
+- `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`: 25 passed
+- `pytest -q`: 84 passed, 1 warning
 
 ## Uncommitted changes
 
-None expected at the end of this session. The final Codex response should confirm `git status --short --branch` after push.
+- Task 1 source, docs, and report files are modified and ready to commit.
 
 ## Exact resume instructions
 
@@ -76,23 +62,17 @@ None expected at the end of this session. The final Codex response should confir
 cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
 ```
 
-2. Check branch and status:
+2. Check the branch and status:
 
 ```bash
-/opt/homebrew/bin/git status --short --branch
-/opt/homebrew/bin/git rev-parse HEAD
+git status --short --branch
+git rev-parse HEAD
 ```
 
-3. Review the plan:
+3. Review the Task 1 report:
 
 ```text
-docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md
+.superpowers/sdd/task-1-report.md
 ```
 
-4. Execute the plan using Subagent-Driven development if the user confirms that mode:
-
-```text
-Use superpowers:subagent-driven-development and execute the plan task by task.
-```
-
-5. Do not skip the plan's red-green test steps, targeted tests, final full `pytest -q`, `docs/current-task.md`, or `docs/handoff.md`.
+4. Continue with the next approved task only after Task 1 is committed and pushed.

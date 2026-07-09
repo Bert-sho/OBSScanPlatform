@@ -475,7 +475,7 @@ class Scanner:
                 finally:
                     queue.task_done()
 
-        worker_count = min(max(1, self.config.scan.per_bucket_prefix_concurrency), len(prefixes))
+        worker_count = min(max(1, self.config.scan.objectkeys_concurrency_limit()), len(prefixes))
         if worker_count:
             await asyncio.gather(*(worker() for _ in range(worker_count)))
 

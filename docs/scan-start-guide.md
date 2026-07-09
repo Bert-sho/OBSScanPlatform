@@ -52,6 +52,16 @@ applications:
         filelist_depth: 8
 ```
 
+推荐并发默认值：
+
+```yaml
+scan:
+  global_request_concurrency: 150
+  objectkeys_concurrency_per_bucket: 30
+```
+
+`objectkeys_concurrency_per_bucket` 只限制单个桶内 objectkeys 前缀 worker 的并发；`filelist` 和 metadata 请求仍受全局请求并发限制。旧配置项 `per_bucket_prefix_concurrency` 仍兼容，但新配置建议使用 `objectkeys_concurrency_per_bucket`。
+
 扫描结果默认写入：
 
 ```text
