@@ -186,6 +186,7 @@ class Scanner:
             _endpoint(self.config.endpoint_for(application), "/rest/s3/listbuckets"),
             params={"appid": application.appid},
             headers={**JSON_HEADERS, "csb-token": application.apptoken},
+            endpoint="listbuckets",
         )
         buckets: list[BucketInfo] = []
         for item in _items_from_payload(_result_payload(data), "buckets", "bucketList", "list"):
@@ -284,6 +285,7 @@ class Scanner:
                 "bucketUid": bucket.bucket_id,
             },
             headers=JSON_HEADERS,
+            endpoint="bucket_endpoint",
         )
         result = _result_payload(data)
         if isinstance(result, dict):
@@ -333,6 +335,7 @@ class Scanner:
                         url,
                         params={"appid": application.appid, "requestbody": request_body},
                         headers={**JSON_HEADERS, "csb-token": application.apptoken},
+                        endpoint="filelist",
                     )
                     payload = _result_payload(data)
                     for item in _items_from_payload(payload, "files", "list", "items"):
@@ -438,6 +441,7 @@ class Scanner:
                             "bucketld": bucket.bucket_id,
                         },
                         headers=JSON_HEADERS,
+                        endpoint="metadata",
                     )
                     row = self._metadata_to_object_row(object_key, data)
                     if row is not None:
@@ -503,6 +507,7 @@ class Scanner:
                     "bucketld": bucket.bucket_id,
                 },
                 headers=JSON_HEADERS,
+                endpoint="objectkeys",
             )
             payload = _result_payload(data)
             rows = [

@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Task 1: Config Defaults and Objectkeys Concurrency Resolver
+Task 2: Sanitized OBS Request Errors
 
 ## Current branch
 
@@ -14,55 +14,56 @@ Task 1: Config Defaults and Objectkeys Concurrency Resolver
 
 ## User goal
 
-Implement the Task 1 config changes for the OBS scan platform:
+Implement Task 2 sanitized OBS request errors for the OBS scan platform:
 
-- set `scan.global_request_concurrency` default to `150`
-- set per-bucket objectkeys concurrency default to `30`
-- keep `scan.per_bucket_prefix_concurrency` accepted for legacy YAML configs
-- add `ScanSettings.objectkeys_concurrency_limit()`
-- update sample config and operator docs
+- add endpoint-labeled, sanitized `OBSRequestError` failures
+- keep retry semantics: fail fast for HTTP 4xx, retry HTTP 5xx and OBS `success=false`
+- avoid leaking full URLs, query strings, encoded request bodies, or tokens in default errors/logs
+- pass endpoint labels from scanner call sites
 
 ## Completed work
 
-- Added three config regression tests covering the new defaults, legacy compatibility, and precedence between new and old fields.
-- Implemented `ScanSettings.objectkeys_concurrency_limit()` in `src/obs_scan_platform/config.py`.
-- Updated `ScanSettings` defaults so `global_request_concurrency` defaults to `150`.
-- Added the new `objectkeys_concurrency_per_bucket` field while preserving `per_bucket_prefix_concurrency`.
-- Switched scanner objectkeys worker sizing to use the new resolver.
-- Updated `config/apps.example.yaml` to show the new recommended settings.
-- Updated `docs/scan-start-guide.md` to explain the new per-bucket objectkeys concurrency guidance.
+- Added sanitized OBS client regression tests for 404, 503-after-retry, and `success=false` error cases.
+- Updated the existing 404 behavior test to expect `OBSRequestError` instead of `httpx.HTTPStatusError`.
+- Implemented structured `OBSRequestError(endpoint, status_code, reason)` in `src/obs_scan_platform/obs_client.py`.
+- Sanitized HTTP and JSON failure reasons so default request failures no longer include raw request URLs, tokens, or encoded bodies.
+- Preserved retry behavior: HTTP 4xx fails fast, HTTP 5xx retries, OBS JSON `success=false` retries through `max_retries`.
+- Passed endpoint labels from scanner OBS call sites and updated fake test clients to accept the new keyword argument.
+- Updated `docs/current-task.md` and `docs/handoff.md` for Task 2.
 
 ## Remaining work
 
-- None for Task 1.
+- None for Task 2.
 
 ## Key files changed
 
-- `src/obs_scan_platform/config.py`
+- `src/obs_scan_platform/obs_client.py`
 - `src/obs_scan_platform/scanner.py`
-- `tests/test_config.py`
-- `config/apps.example.yaml`
-- `docs/scan-start-guide.md`
+- `tests/test_obs_client.py`
+- `tests/test_scanner.py`
+- `tests/test_scan_end_to_end.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
-- `pytest tests/test_config.py -v`
-- `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`
-- `pytest -q`
+- `pytest tests/test_obs_client.py -v` (RED)
+- `pytest tests/test_obs_client.py -v` (GREEN)
+- `pytest tests/test_scanner.py -v`
+- `pytest tests/test_scan_end_to_end.py -v`
 
 ## Validation result
 
-- `pytest tests/test_config.py -v`: 9 passed
-- `pytest tests/test_scanner.py tests/test_scan_end_to_end.py -v`: 25 passed
-- `pytest -q`: 84 passed, 1 warning
+- RED: `pytest tests/test_obs_client.py -v` failed with 4 expected failures because `OBSClient.get_json()` did not yet accept `endpoint=`.
+- GREEN: `pytest tests/test_obs_client.py -v` passed with 10/10 tests green after the fix.
+- `pytest tests/test_scanner.py -v`: 23 passed
+- `pytest tests/test_scan_end_to_end.py -v`: 2 passed
 
 ## Known risks
 
-- `per_bucket_prefix_concurrency` is still accepted, but the new resolver now centralizes the decision in `ScanSettings`. If future scan phases need different per-bucket concurrency, they should use the resolver rather than the raw field.
-- The full suite reported one existing `StarletteDeprecationWarning`; it did not block the task.
+- The new sanitization trims failure reasons to 200 characters. If operators later need richer diagnostics, expand them carefully without reintroducing secret-bearing request details.
+- I did not run the full `pytest -q` suite in this task; validation was targeted to the OBS client, scanner, and end-to-end scanner tests touched by the change.
 
 ## Next recommended action
 
-- Continue with Task 2 from `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md` after the Task 1 review is clean.
+- Continue with the next task in `docs/superpowers/plans/2026-07-09-obs-scan-behavior-corrections.md`, starting from the current branch head after confirming push status.

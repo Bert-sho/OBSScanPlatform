@@ -42,6 +42,7 @@ class FakeOBSClient:
         *,
         params: dict[str, Any],
         headers: dict[str, str] | None = None,
+        endpoint: str = "unknown",
     ) -> dict[str, Any]:
         self.calls.append({"url": url, "params": params, "headers": headers})
 
@@ -138,6 +139,7 @@ class EmptyFolderOBSClient(FakeOBSClient):
         *,
         params: dict[str, Any],
         headers: dict[str, str] | None = None,
+        endpoint: str = "unknown",
     ) -> dict[str, Any]:
         self.calls.append({"url": url, "params": params, "headers": headers})
 

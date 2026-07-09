@@ -98,8 +98,8 @@ async def test_get_json_does_not_retry_404():
     )
 
     try:
-        with pytest.raises(httpx.HTTPStatusError):
-            await client.get_json("http://obs.example/test", params={})
+        with pytest.raises(OBSRequestError):
+            await client.get_json("http://obs.example/test", params={}, endpoint="filelist")
     finally:
         await client.close()
 
@@ -153,3 +153,84 @@ async def test_get_json_retries_success_false_then_succeeds():
 
     assert data["value"] == 1
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_get_json_404_error_is_sanitized_and_has_endpoint_label():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"success": False, "msg": "missing"})
+
+    client = OBSClient(
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
+        request_semaphore=asyncio.Semaphore(1),
+        max_retries=3,
+        retry_base_delay_seconds=0,
+        retry_max_delay_seconds=0,
+    )
+
+    try:
+        with pytest.raises(OBSRequestError) as exc_info:
+            await client.get_json(
+                "http://obs.example/test?token=secret-token",
+                params={"requestbody": "encoded-secret-body"},
+                endpoint="filelist",
+            )
+    finally:
+        await client.close()
+
+    message = str(exc_info.value)
+    assert "endpoint=filelist" in message
+    assert "status=404" in message
+    assert "missing" in message
+    assert "http://obs.example" not in message
+    assert "secret-token" not in message
+    assert "encoded-secret-body" not in message
+
+
+@pytest.mark.asyncio
+async def test_get_json_503_error_after_retries_is_sanitized():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503, json={"success": False, "msg": "busy"})
+
+    client = OBSClient(
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
+        request_semaphore=asyncio.Semaphore(1),
+        max_retries=1,
+        retry_base_delay_seconds=0,
+        retry_max_delay_seconds=0,
+    )
+
+    try:
+        with pytest.raises(OBSRequestError) as exc_info:
+            await client.get_json("http://obs.example/test", params={}, endpoint="objectkeys")
+    finally:
+        await client.close()
+
+    assert calls == 2
+    assert str(exc_info.value) == "OBS request failed endpoint=objectkeys status=503 reason=busy"
+
+
+@pytest.mark.asyncio
+async def test_get_json_success_false_error_is_sanitized():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"success": False, "msg": "permission denied"})
+
+    client = OBSClient(
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
+        request_semaphore=asyncio.Semaphore(1),
+        max_retries=0,
+        retry_base_delay_seconds=0,
+        retry_max_delay_seconds=0,
+    )
+
+    try:
+        with pytest.raises(OBSRequestError) as exc_info:
+            await client.get_json("http://obs.example/test", params={"token": "secret"}, endpoint="metadata")
+    finally:
+        await client.close()
+
+    assert str(exc_info.value) == "OBS request failed endpoint=metadata status=200 reason=permission denied"

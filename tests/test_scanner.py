@@ -27,7 +27,7 @@ class FakeClient:
         self.responses = list(responses)
         self.calls = []
 
-    async def get_json(self, url, *, params, headers=None):
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
         self.calls.append({"url": url, "params": params, "headers": headers})
         return self.responses.pop(0)
 
@@ -40,7 +40,7 @@ class ConcurrentFakeClient:
         self.max_active = 0
         self.lock = asyncio.Lock()
 
-    async def get_json(self, url, *, params, headers=None):
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
         async with self.lock:
             self.active += 1
             self.max_active = max(self.max_active, self.active)
@@ -55,7 +55,7 @@ class RepeatingRootOffsetClient:
     def __init__(self):
         self.calls = []
 
-    async def get_json(self, url, *, params, headers=None):
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
         await asyncio.sleep(0)
         self.calls.append({"url": url, "params": params, "headers": headers})
         return {"result": {"files": [], "nextOffset": 1}}
