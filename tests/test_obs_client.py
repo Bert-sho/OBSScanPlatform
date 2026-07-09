@@ -215,6 +215,43 @@ async def test_get_json_503_error_after_retries_is_sanitized():
 
 
 @pytest.mark.asyncio
+async def test_get_json_non_json_error_body_is_sanitized():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            503,
+            text="upstream failed for https://obs.example/test?token=secret-token requestbody=encoded-secret-body",
+        )
+
+    client = OBSClient(
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
+        request_semaphore=asyncio.Semaphore(1),
+        max_retries=0,
+        retry_base_delay_seconds=0,
+        retry_max_delay_seconds=0,
+    )
+
+    try:
+        with pytest.raises(OBSRequestError) as exc_info:
+            await client.get_json(
+                "http://obs.example/test?token=secret-token",
+                params={"requestbody": "encoded-secret-body"},
+                endpoint="objectkeys",
+            )
+    finally:
+        await client.close()
+
+    message = str(exc_info.value)
+    assert "endpoint=objectkeys" in message
+    assert "status=503" in message
+    assert "Service Unavailable" in message
+    assert "obs.example" not in message
+    assert "secret-token" not in message
+    assert "encoded-secret-body" not in message
+    assert "requestbody" not in message
+    assert "upstream failed for" not in message
+
+
+@pytest.mark.asyncio
 async def test_get_json_connect_error_is_sanitized():
     async def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connect boom https://obs.example/path?token=secret-token")

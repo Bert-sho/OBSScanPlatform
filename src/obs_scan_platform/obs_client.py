@@ -25,8 +25,7 @@ def _response_reason(response: httpx.Response) -> str:
     try:
         data = response.json()
     except ValueError:
-        text = response.text.strip()
-        return text[:200] if text else response.reason_phrase
+        return response.reason_phrase or f"HTTP {response.status_code}"
     if isinstance(data, dict):
         value = data.get("msg") or data.get("message") or data.get("error")
         if value:
