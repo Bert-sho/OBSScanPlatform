@@ -235,7 +235,7 @@ class Scanner:
         try:
             endpoint = await self._get_bucket_endpoint(application, bucket, client)
             discovery = await self._discover_root(application, bucket, client, thresholds)
-            await self._collect_root_files(application, bucket, endpoint, discovery.metadata_files, temp_dir, client)
+            await self._collect_metadata_files(application, bucket, endpoint, discovery.metadata_files, temp_dir, client)
             await self._collect_prefixes(application, bucket, endpoint, discovery.prefixes, temp_dir, client)
             aggregate_bucket(
                 run_id=run_id,
@@ -405,18 +405,18 @@ class Scanner:
             raw_prefix = raw_prefix.split("/", 1)[0]
         return f"{raw_prefix.rstrip('/')}/"
 
-    async def _collect_root_files(
+    async def _collect_metadata_files(
         self,
         application: ApplicationConfig,
         bucket: BucketInfo,
         endpoint: str,
-        root_files: list[str],
+        object_keys: list[str],
         temp_dir: Path,
         client: OBSClient,
     ) -> None:
         rows: list[ObjectRow] = []
         queue: asyncio.Queue[str] = asyncio.Queue()
-        for object_key in root_files:
+        for object_key in object_keys:
             queue.put_nowait(object_key)
 
         async def worker() -> None:
@@ -445,11 +445,11 @@ class Scanner:
                 finally:
                     queue.task_done()
 
-        worker_count = min(max(1, self.config.scan.metadata_concurrency_per_bucket), len(root_files))
+        worker_count = min(max(1, self.config.scan.metadata_concurrency_per_bucket), len(object_keys))
         if worker_count:
             await asyncio.gather(*(worker() for _ in range(worker_count)))
         if rows:
-            append_object_rows(temp_dir / "root_files.csv", rows)
+            append_object_rows(temp_dir / "metadata_files.csv", rows)
 
     async def _collect_prefixes(
         self,

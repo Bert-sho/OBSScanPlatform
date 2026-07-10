@@ -61,6 +61,38 @@ class RepeatingRootOffsetClient:
         return {"result": {"files": [], "nextOffset": 1}}
 
 
+class PhaseOrderClient:
+    def __init__(self):
+        self.phase_events: list[str] = []
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        self.phase_events.append(endpoint)
+        if endpoint == "bucket_endpoint":
+            return {"result": "http://bucket-endpoint/"}
+        if endpoint == "filelist":
+            request_body = decode_request_body({"params": params})
+            if request_body["path"] == "/":
+                return {
+                    "result": {
+                        "files": [
+                            {"objectType": "folder", "objectKey": "alpha/"},
+                            {"objectType": "object", "objectKey": "root.txt"},
+                        ],
+                        "nextOffset": "",
+                    }
+                }
+            return {"result": {"files": [], "nextOffset": ""}}
+        if endpoint == "metadata":
+            assert "objectkeys" not in self.phase_events
+            return {"result": {"objectKey": {"objectKey": "root.txt", "size": "12", "lastModifyTime": "1000"}}}
+        if endpoint == "objectkeys":
+            metadata_index = self.phase_events.index("metadata")
+            objectkeys_index = len(self.phase_events) - 1
+            assert metadata_index < objectkeys_index
+            return {"result": {"objectkeys": [], "truncated": "false"}}
+        raise AssertionError(endpoint)
+
+
 class DummyProgressBar:
     def __init__(self):
         self.total = 0
@@ -594,11 +626,11 @@ async def test_discover_root_stops_on_repeated_numeric_next_offset():
 
 
 @pytest.mark.asyncio
-async def test_collect_root_files_uses_bucket_name_as_bucketid_and_writes_csv(tmp_path: Path):
+async def test_collect_metadata_files_uses_bucket_name_as_bucketid_and_writes_csv(tmp_path: Path):
     scanner, application, bucket = make_scanner()
     client = FakeClient([{"result": {"objectKey": {"objectKey": "root.txt", "size": "12", "lastModifyTime": "1000"}}}])
 
-    await scanner._collect_root_files(
+    await scanner._collect_metadata_files(
         application,
         bucket,
         "http://bucket-endpoint",
@@ -610,12 +642,12 @@ async def test_collect_root_files_uses_bucket_name_as_bucketid_and_writes_csv(tm
     call = client.calls[0]
     assert call["params"]["bucketid"] == bucket.name
     assert call["params"]["bucketld"] == bucket.bucket_id
-    rows = list(csv.DictReader((tmp_path / "root_files.csv").open(newline="", encoding="utf-8")))
+    rows = list(csv.DictReader((tmp_path / "metadata_files.csv").open(newline="", encoding="utf-8")))
     assert rows == [{"object_key": "root.txt", "size_bytes": "12", "last_modified_ms": "1000"}]
 
 
 @pytest.mark.asyncio
-async def test_collect_root_files_processes_all_files_with_bounded_workers(tmp_path: Path):
+async def test_collect_metadata_files_processes_all_files_with_bounded_workers(tmp_path: Path):
     scanner, application, bucket = make_scanner()
     scanner.config.scan.metadata_concurrency_per_bucket = 2
     client = ConcurrentFakeClient(
@@ -625,7 +657,7 @@ async def test_collect_root_files_processes_all_files_with_bounded_workers(tmp_p
         ]
     )
 
-    await scanner._collect_root_files(
+    await scanner._collect_metadata_files(
         application,
         bucket,
         "http://bucket-endpoint",
@@ -634,7 +666,7 @@ async def test_collect_root_files_processes_all_files_with_bounded_workers(tmp_p
         client,
     )
 
-    rows = list(csv.DictReader((tmp_path / "root_files.csv").open(newline="", encoding="utf-8")))
+    rows = list(csv.DictReader((tmp_path / "metadata_files.csv").open(newline="", encoding="utf-8")))
     assert sorted(row["object_key"] for row in rows) == [f"root-{index}.txt" for index in range(5)]
     assert client.max_active <= 2
 
@@ -665,7 +697,8 @@ async def test_collect_prefix_stops_when_truncated_string_false(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_collect_prefixes_processes_all_prefixes_with_bounded_workers(tmp_path: Path):
     scanner, application, bucket = make_scanner()
-    scanner.config.scan.per_bucket_prefix_concurrency = 2
+    scanner.config.scan.objectkeys_concurrency_per_bucket = 2
+    scanner.config.scan.per_bucket_prefix_concurrency = 5
     prefixes = [f"prefix-{index}/" for index in range(5)]
     client = ConcurrentFakeClient(
         [
@@ -687,6 +720,18 @@ async def test_collect_prefixes_processes_all_prefixes_with_bounded_workers(tmp_
         rows = list(csv.DictReader((tmp_path / prefix_temp_filename(prefix)).open(newline="", encoding="utf-8")))
         assert rows == [{"object_key": f"{prefix}file.txt", "size_bytes": "5", "last_modified_ms": "2000"}]
     assert client.max_active <= 2
+
+
+@pytest.mark.asyncio
+async def test_scan_bucket_finishes_filelist_and_metadata_before_objectkeys(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    scanner.config.scan.objectkeys_concurrency_per_bucket = 1
+    client = PhaseOrderClient()
+
+    result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+
+    assert result.status == ScanStatus.SUCCESS
+    assert client.phase_events == ["bucket_endpoint", "filelist", "filelist", "metadata", "objectkeys"]
 
 
 @pytest.mark.asyncio
