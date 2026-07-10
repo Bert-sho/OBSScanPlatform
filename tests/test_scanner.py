@@ -1019,6 +1019,25 @@ class MetadataPartialFailureClient:
         }
 
 
+class ObjectkeysPartialFailureClient:
+    def __init__(self):
+        self.calls: list[dict[str, Any]] = []
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        self.calls.append({"url": url, "params": params, "headers": headers})
+        prefix = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
+        if prefix == "bad/":
+            raise RuntimeError("objectkeys unavailable")
+        return {
+            "result": {
+                "objectkeys": [
+                    {"objectKey": f"{prefix}file.txt", "size": "5", "lastModifyTime": "2000"},
+                ],
+                "truncated": "false",
+            }
+        }
+
+
 @pytest.mark.asyncio
 async def test_collect_metadata_files_records_failure_and_keeps_other_files(tmp_path: Path):
     scanner, application, bucket = make_scanner()
@@ -1088,6 +1107,66 @@ async def test_collect_prefix_stops_when_truncated_string_false(tmp_path: Path):
     call = client.calls[0]
     assert call["params"]["bucketid"] == bucket.name
     assert call["params"]["bucketld"] == bucket.bucket_id
+
+
+@pytest.mark.asyncio
+async def test_collect_prefixes_records_prefix_failure_and_keeps_other_prefixes(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    scanner, application, bucket = make_scanner()
+    scanner.config.scan.objectkeys_concurrency_per_bucket = 1
+    partial_errors = PartialErrorSummary()
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        await scanner._collect_prefixes(
+            application,
+            bucket,
+            "http://bucket-endpoint",
+            ["good/", "bad/", "also-good/"],
+            tmp_path,
+            ObjectkeysPartialFailureClient(),
+            partial_errors=partial_errors,
+        )
+
+    assert (tmp_path / prefix_temp_filename("good/")).exists()
+    assert not (tmp_path / prefix_temp_filename("bad/")).exists()
+    assert (tmp_path / prefix_temp_filename("also-good/")).exists()
+    assert partial_errors.to_manifest()["objectkeys_failed_prefixes"] == 1
+    assert partial_errors.to_manifest()["samples"][0]["target"] == "bad/"
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("objectkeys start appid=app.one bucket=bucket-name-1 total=3" in message for message in messages)
+    assert any("objectkeys prefix failure appid=app.one bucket=bucket-name-1 prefix=bad/" in message for message in messages)
+    assert any("objectkeys finish appid=app.one bucket=bucket-name-1 completed=3 total=3 failed=1" in message for message in messages)
+    assert all("http://bucket-endpoint" not in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_collect_prefixes_updates_objectkeys_progress_for_success_and_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, application, bucket = make_scanner()
+    scanner.show_progress = True
+    scanner.config.scan.objectkeys_concurrency_per_bucket = 1
+    progress_bar = DummyProgressBar()
+    partial_errors = PartialErrorSummary()
+
+    monkeypatch.setattr(scanner, "_objectkeys_progress_bar", lambda app, bucket_info, total: progress_bar)
+
+    await scanner._collect_prefixes(
+        application,
+        bucket,
+        "http://bucket-endpoint",
+        ["good/", "bad/"],
+        tmp_path,
+        ObjectkeysPartialFailureClient(),
+        partial_errors=partial_errors,
+    )
+
+    assert progress_bar.total == 2
+    assert progress_bar.updates == [1, 1]
+    assert progress_bar.closed
 
 
 @pytest.mark.asyncio

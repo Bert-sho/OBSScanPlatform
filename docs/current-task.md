@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Task 3: Metadata Per-Object Partial Fallback
+Task 4: Objectkeys Per-Prefix Fallback And Progress
 
 ## Current branch
 
@@ -14,20 +14,20 @@ Task 3: Metadata Per-Object Partial Fallback
 
 ## User goal
 
-Add per-object metadata fallback so a single metadata failure is recorded as partial, the remaining metadata files still write to CSV, and `_collect_metadata_files` accepts an optional `partial_errors` parameter.
+Add per-prefix objectkeys fallback so a single prefix failure is recorded as partial, the remaining prefixes still write their CSV fragments, and `_collect_prefixes()` reports sanitized progress/failure logs plus an optional objectkeys progress bar.
 
 ## Completed work
 
-- Added a focused regression test that forces one metadata object to fail while the others continue to write.
-- Threaded an optional `PartialErrorSummary` through `_collect_metadata_files()`.
-- Recorded per-object metadata failures as partial errors and logged the failure without aborting the rest of the metadata collection.
-- Sanitized the metadata failure warning so raw URLs and token text from exceptions do not reach logs.
-- Kept the metadata worker concurrency and CSV writing behavior unchanged for successful objects.
+- Added the two Task 4 regression tests from the brief for prefix fallback/logging and objectkeys progress updates.
+- Added `_objectkeys_progress_bar()` alongside the existing filelist progress helper.
+- Extended `_collect_prefixes()` with an optional `partial_errors` parameter, per-prefix exception handling, sanitized failure logging, and progress/start/finish logs.
+- Ensured objectkeys progress advances for both successful and failed prefixes and closes the progress bar from a `finally` path.
+- Kept the change scoped to objectkeys helper behavior only; no bucket-level status or manifest integration was added.
 
 ## Remaining work
 
-- None for Task 3.
-- Later tasks still need objectkeys fallback integration and the bucket-level final status handling.
+- None for Task 4.
+- Task 5 still needs to wire bucket-level final status and end-to-end manifest behavior.
 
 ## Key files changed
 
@@ -35,26 +35,23 @@ Add per-object metadata fallback so a single metadata failure is recorded as par
 - `tests/test_scanner.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
-- `.superpowers/sdd/task-3-report.md`
+- `.superpowers/sdd/task-4-report.md`
 
 ## Validation commands run
 
-- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_collect_metadata_files_records_failure_and_keeps_other_files -q`
-- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_collect_metadata_files_sanitizes_failure_logs -q`
-- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_collect_metadata_files_records_failure_and_keeps_other_files tests/test_scanner.py::test_collect_metadata_files_uses_bucket_name_as_bucketid_and_writes_csv tests/test_scanner.py::test_collect_metadata_files_processes_all_files_with_bounded_workers -q`
-- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_collect_metadata_files_records_failure_and_keeps_other_files tests/test_scanner.py::test_collect_metadata_files_uses_bucket_name_as_bucketid_and_writes_csv tests/test_scanner.py::test_collect_metadata_files_processes_all_files_with_bounded_workers tests/test_scanner.py::test_collect_metadata_files_sanitizes_failure_logs -q`
+- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_collect_prefixes_records_prefix_failure_and_keeps_other_prefixes tests/test_scanner.py::test_collect_prefixes_updates_objectkeys_progress_for_success_and_failure -q`
+- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_collect_prefixes_records_prefix_failure_and_keeps_other_prefixes tests/test_scanner.py::test_collect_prefixes_updates_objectkeys_progress_for_success_and_failure tests/test_scanner.py::test_collect_prefixes_processes_all_prefixes_with_bounded_workers tests/test_scanner.py::test_collect_prefix_stops_when_truncated_string_false -q`
 
 ## Validation result
 
-- The first focused run failed as expected before the scanner change because `_collect_metadata_files()` did not accept `partial_errors`.
-- After the fix, the focused metadata suite passed: `3 passed in 0.41s`.
-- The sanitizer regression test failed before the scanner change because the warning logged the raw exception text, then passed after switching the metadata warning to the existing sanitizer.
+- The first focused run failed as expected before implementation because `_collect_prefixes()` did not accept `partial_errors` and `Scanner` had no `_objectkeys_progress_bar()`.
+- After the scanner change, the focused objectkeys suite passed: `4 passed in 0.45s`.
 
 ## Known risks
 
-- This task only covers metadata fallback. Objectkeys fallback behavior is intentionally left for later tasks.
-- The new partial-error threading is only populated from metadata paths in this task.
+- `_scan_bucket()` still does not pass `partial_errors` into metadata/objectkeys helper calls; that end-to-end partial status plumbing is intentionally deferred to Task 5.
+- Objectkeys failure logging now sanitizes exception text before emission to avoid leaking URLs or tokens, but only the helper-level path changed in this task.
 
 ## Next recommended action
 
-Start the next approved fallback task and extend partial-error plumbing into objectkeys collection.
+Start Task 5 and wire the existing helper-level partial error tracking into bucket-level final status and manifest output.

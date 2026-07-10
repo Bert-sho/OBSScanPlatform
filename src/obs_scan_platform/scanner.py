@@ -507,6 +507,13 @@ class Scanner:
 
         return tqdm(total=total, desc=f"{application.appid}/{bucket.name} filelist", unit="dir")
 
+    def _objectkeys_progress_bar(self, application: ApplicationConfig, bucket: BucketInfo, total: int) -> Any | None:
+        if not self.show_progress:
+            return None
+        from tqdm import tqdm
+
+        return tqdm(total=total, desc=f"{application.appid}/{bucket.name} objectkeys", unit="prefix")
+
     def _filelist_folder_prefix(self, path: str, value: Any) -> str:
         raw_prefix = str(value or "").strip("/")
         if not raw_prefix:
@@ -584,12 +591,24 @@ class Scanner:
         prefixes: list[str],
         temp_dir: Path,
         client: OBSClient,
+        partial_errors: PartialErrorSummary | None = None,
     ) -> None:
+        total = len(prefixes)
+        if total == 0:
+            LOGGER.info("objectkeys skipped appid=%s bucket=%s total=0", application.appid, bucket.name)
+            return
+        completed = 0
+        failed = 0
+        progress_bar = self._objectkeys_progress_bar(application, bucket, total)
+        if progress_bar is not None:
+            progress_bar.total = total
+        LOGGER.info("objectkeys start appid=%s bucket=%s total=%s", application.appid, bucket.name, total)
         queue: asyncio.Queue[str] = asyncio.Queue()
         for prefix in prefixes:
             queue.put_nowait(prefix)
 
         async def worker() -> None:
+            nonlocal completed, failed
             while True:
                 try:
                     prefix = queue.get_nowait()
@@ -597,12 +616,47 @@ class Scanner:
                     return
                 try:
                     await self._collect_prefix(application, bucket, endpoint, prefix, temp_dir, client)
+                except Exception as exc:
+                    failed += 1
+                    if partial_errors is not None:
+                        partial_errors.record("objectkeys", prefix, exc)
+                    sanitized_error = _sanitize_reason(str(exc))
+                    LOGGER.warning(
+                        "objectkeys prefix failure appid=%s bucket=%s prefix=%s error=%s",
+                        application.appid,
+                        bucket.name,
+                        prefix,
+                        sanitized_error,
+                    )
                 finally:
+                    completed += 1
+                    LOGGER.info(
+                        "objectkeys progress appid=%s bucket=%s completed=%s total=%s failed=%s",
+                        application.appid,
+                        bucket.name,
+                        completed,
+                        total,
+                        failed,
+                    )
+                    if progress_bar is not None:
+                        progress_bar.update(1)
                     queue.task_done()
 
-        worker_count = min(max(1, self.config.scan.objectkeys_concurrency_limit()), len(prefixes))
-        if worker_count:
-            await asyncio.gather(*(worker() for _ in range(worker_count)))
+        try:
+            worker_count = min(max(1, self.config.scan.objectkeys_concurrency_limit()), len(prefixes))
+            if worker_count:
+                await asyncio.gather(*(worker() for _ in range(worker_count)))
+        finally:
+            if progress_bar is not None:
+                progress_bar.close()
+        LOGGER.info(
+            "objectkeys finish appid=%s bucket=%s completed=%s total=%s failed=%s",
+            application.appid,
+            bucket.name,
+            completed,
+            total,
+            failed,
+        )
 
     async def _collect_prefix(
         self,

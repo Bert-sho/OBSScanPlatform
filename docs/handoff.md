@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-10 18:46:52 +08:00
+2026-07-10 19:09:22 +08:00
 
 ## Machine/environment
 
@@ -18,53 +18,59 @@
 
 ## Latest commit before this session
 
-`c26368827f325ef5bdddda4c34dee3ba8ee7b371`
+`d4f5b2437b0c36841be0c3e88a9502b7b75cc183`
 
 ## Latest commit after this session
 
-Pending final commit from this task. Update this file with the actual hash after commit.
+Pending final commit from Task 4. Use the commit recorded in the final response after this handoff update is committed.
 
 ## Summary of what changed
 
-- Added a regression test that forces one metadata object to fail while the others continue.
-- Threaded an optional `PartialErrorSummary` through `_collect_metadata_files()` in `src/obs_scan_platform/scanner.py`.
-- Recorded per-object metadata failures as partial errors and logged them without aborting the rest of the metadata collection.
-- Sanitized the metadata failure warning so raw URLs and token text from exceptions do not reach logs.
-- Kept successful metadata CSV writing and concurrency limits unchanged.
+- Added the Task 4 objectkeys regression tests that cover per-prefix fallback/logging and objectkeys progress updates.
+- Added `Scanner._objectkeys_progress_bar()` in `src/obs_scan_platform/scanner.py`.
+- Extended `_collect_prefixes()` with optional `partial_errors`, per-prefix exception handling, sanitized failure logging, and start/progress/finish objectkeys logs.
+- Ensured objectkeys progress bars are closed from a `finally` path even when one prefix fails.
+- Left bucket-level partial status/manifest integration untouched for Task 5.
 
 ## Important decisions and rationale
 
-- Kept the change scoped to metadata fallback only, matching the Task 3 brief.
-- Used the same partial-error recording pattern already established by filelist discovery.
-- Did not touch objectkeys collection or bucket-level final status handling; those are reserved for later tasks.
+- Kept the implementation scoped to the helper path named in the brief: `_collect_prefixes()`.
+- Sanitized the objectkeys failure warning with `_sanitize_reason(str(exc))` instead of logging raw exception text, because this repo already enforces safe logging for URLs/tokens.
+- Did not thread `partial_errors` through `_scan_bucket()` for objectkeys in this task, because the brief and user context explicitly reserve bucket-level status integration for Task 5.
 
 ## Failed attempts or rejected approaches
 
-- The first targeted pytest run failed before implementation because `_collect_metadata_files()` did not accept `partial_errors`.
-- The sanitizer regression test failed before the scanner change because the warning logged the raw exception text.
-- No broader objectkeys fallback or bucket final-status logic was added here; that remains reserved for later tasks.
+- The RED pytest run failed before implementation because `_collect_prefixes()` did not accept `partial_errors`.
+- The RED pytest run also failed because `Scanner` had no `_objectkeys_progress_bar()`.
+- Deliberately rejected broader `_scan_bucket()` wiring in this task to avoid stepping into Task 5 behavior.
 
 ## Current test/build status
 
-Focused validation passed:
+RED evidence:
 
 ```powershell
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_collect_metadata_files_records_failure_and_keeps_other_files tests/test_scanner.py::test_collect_metadata_files_uses_bucket_name_as_bucketid_and_writes_csv tests/test_scanner.py::test_collect_metadata_files_processes_all_files_with_bounded_workers -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_collect_prefixes_records_prefix_failure_and_keeps_other_prefixes tests/test_scanner.py::test_collect_prefixes_updates_objectkeys_progress_for_success_and_failure -q
 ```
 
-Result: `3 passed in 0.41s`
+Result: `2 failed in 0.57s`
 
-Additional sanitizer regression passed:
+GREEN evidence:
 
 ```powershell
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_collect_metadata_files_sanitizes_failure_logs -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_collect_prefixes_records_prefix_failure_and_keeps_other_prefixes tests/test_scanner.py::test_collect_prefixes_updates_objectkeys_progress_for_success_and_failure tests/test_scanner.py::test_collect_prefixes_processes_all_prefixes_with_bounded_workers tests/test_scanner.py::test_collect_prefix_stops_when_truncated_string_false -q
 ```
 
-Result: `1 passed in 0.50s`
+Result: `4 passed in 0.45s`
 
 ## Uncommitted changes, if any
 
-Pending final commit of the Task 3 code and documentation updates.
+Expected before the final Task 4 commit:
+
+- `src/obs_scan_platform/scanner.py`
+- `tests/test_scanner.py`
+- `docs/current-task.md`
+- `docs/handoff.md`
+- `.superpowers/sdd/task-4-report.md`
 
 ## Exact resume instructions for the next Codex session
 
@@ -74,7 +80,7 @@ Pending final commit of the Task 3 code and documentation updates.
 cd D:\code\OBSScanPlatform
 ```
 
-2. Confirm branch and diff:
+2. Confirm branch, status, and diff:
 
 ```powershell
 git status --short --branch
@@ -82,17 +88,16 @@ git diff --stat
 git diff
 ```
 
-3. If Task 3 is not yet committed, stage and commit the current work:
+3. Review the Task 4 report for the exact test evidence and scope:
 
 ```powershell
-git add src/obs_scan_platform/scanner.py tests/test_scanner.py docs/current-task.md docs/handoff.md .superpowers/sdd/task-3-report.md
-git commit -m "feat: continue after metadata object failures"
+Get-Content .superpowers\sdd\task-4-report.md
 ```
 
-4. Push the branch after commit:
+4. If Task 4 is already committed and pushed, move to Task 5 only:
 
 ```powershell
-git push -u origin HEAD
+git rev-parse HEAD
 ```
 
-5. Resume the next approved fallback task only after Task 2 is recorded and pushed.
+Then continue with bucket-level final status / manifest integration without reworking the helper-level objectkeys fallback added here.
