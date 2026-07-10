@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-10 19:18:53 +08:00
+2026-07-10 19:35:04 +08:00
 
 ## Machine/environment
 
@@ -16,54 +16,77 @@
 
 `codex/obs-scan-platform`
 
-## Latest commit before this session
+## Latest commit before this implementation session
 
-`f923235ddadd8790d7deadf7056af10f91e3de2b`
+`2173356b0375bf382f429861e99d68b44955d987`
 
 ## Latest commit after this session
 
-This handoff is committed with the Task 5 work. For the exact final commit hash, run `git rev-parse HEAD` after checkout because embedding the hash in this file would change the commit ID.
+Pending final commit. The final Codex response must report the actual commit hash after
+the review-fix commit is created and pushed.
 
 ## Summary of what changed
 
-- Added the Task 5 `_scan_bucket()` regression test for partial objectkeys failure with a retained CSV.
-- Added the Task 5 end-to-end regression test that expects bucket/application/run manifests to become `partial_failed`.
-- Threaded the existing `PartialErrorSummary` accumulator through `_collect_metadata_files()` and `_collect_prefixes()` from `_scan_bucket()`.
-- Updated `_scan_bucket()` to return `ScanStatus.PARTIAL_FAILED` and include `partial_errors` when aggregation succeeds with local collection failures.
-- Left hard failures unchanged: bucket endpoint lookup, root discovery, and aggregation exceptions still return failed bucket results with `error`.
+- Added `FilelistDiscoveryScheduler.rollback_failed_task()` for child `filelist`
+  failures after partial pagination.
+- The rollback removes the failed prefix, descendant prefixes, queued descendant
+  tasks, queued descendant paths, and direct files under the failed subtree before
+  the task is marked complete.
+- Updated child `filelist` failure handling to call the rollback path instead of
+  `record_empty()`, while preserving root `/` failure behavior.
+- Sanitized child `filelist` failure logs so request URLs and token text are not
+  emitted.
+- Added focused regression tests for paginated child failure rollback and filelist
+  log sanitization.
+- Appended a concise summary with tests/results to
+  `.superpowers/sdd/final-review-fix-report.md`.
 
 ## Important decisions and rationale
 
-- Kept the implementation strictly inside `_scan_bucket()` because helper-level partial error recording was already completed in Tasks 1-4.
-- Did not alter retry settings, concurrency defaults, or CSV schema because the brief explicitly forbids those changes.
-- Preserved existing failed-bucket behavior for true hard failures so Task 5 only changes the partial-success path.
+- Kept the rollback logic inside the scheduler because it owns the discovered prefixes,
+  queued work, and direct-file buffers; this keeps the scanner catch block simple.
+- Pruned by failed path prefix rather than adding more bookkeeping structures, which
+  matches the current scheduler data model and keeps the fix surgical.
+- Preserved root `/` filelist failure behavior exactly as approved in the design/spec.
 
 ## Failed attempts or rejected approaches
 
-- The RED pytest run failed before implementation because `_scan_bucket()` still returned `success` even when `_collect_prefixes()` logged a prefix failure.
-- Rejected any broader refactor of bucket scanning because the brief calls for simple bucket-level status wiring only.
+- Reusing `record_empty()` was not sufficient because it only removed the exact prefix
+  and left page-1 discoveries behind on later-page failure.
+- Did not widen the fix into retry, concurrency, CLI/API, aggregation, or CSV changes;
+  the review finding was local to child `filelist` failure cleanup and log output.
 
 ## Current test/build status
 
-RED evidence:
+Focused regression checks:
 
 ```powershell
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_scan_bucket_returns_partial_failed_with_csv_for_objectkeys_failure tests/test_scan_end_to_end.py::test_scanner_run_marks_bucket_partial_failed_and_keeps_csv -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_discover_root_prunes_partial_child_filelist_results_after_paginated_failure tests/test_scanner.py::test_discover_root_sanitizes_child_filelist_failure_logs -q
 ```
 
-Result: `2 failed in 0.62s`
+Result: `2 passed in 0.43s`.
 
-GREEN evidence:
+Required focused scanner suite:
 
 ```powershell
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_scan_bucket_returns_partial_failed_with_csv_for_objectkeys_failure tests/test_scan_end_to_end.py::test_scanner_run_marks_bucket_partial_failed_and_keeps_csv tests/test_scanner.py::test_scan_bucket_finishes_filelist_and_metadata_before_objectkeys tests/test_scan_end_to_end.py::test_scanner_run_completes_with_mocked_obs_and_directory_csv -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_obs_client.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
 ```
 
-Result: `4 passed in 0.43s`
+Result: `69 passed in 0.89s`.
 
 ## Uncommitted changes, if any
 
-None after the final Task 5 commit. If `git status --short` shows anything else on resume, inspect it before continuing.
+Expected before final commit:
+
+- `src/obs_scan_platform/filelist_discovery.py`
+- `src/obs_scan_platform/scanner.py`
+- `tests/test_scanner.py`
+- `docs/current-task.md`
+- `docs/handoff.md`
+- `.superpowers/sdd/final-review-fix-report.md`
+- deletion of tracked `.superpowers/sdd/task-*-report.md` scratch files
+
+After final commit, `git status --short --branch` should be clean.
 
 ## Exact resume instructions for the next Codex session
 
@@ -73,26 +96,18 @@ None after the final Task 5 commit. If `git status --short` shows anything else 
 cd D:\code\OBSScanPlatform
 ```
 
-2. Confirm branch, status, and diff:
+2. Confirm branch, status, and latest commits:
 
 ```powershell
 git status --short --branch
-git diff --stat
-git diff
+git log --oneline -10
 ```
 
-3. Review the Task 5 report for the exact RED/GREEN evidence and scope:
+3. Re-run focused scanner validation if scanner changes are requested:
 
 ```powershell
-Get-Content .superpowers\sdd\task-5-report.md
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_obs_client.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
 ```
 
-4. If the Task 5 commit has already been created, confirm the final commit hash and push state:
-
-```powershell
-git rev-parse HEAD
-git log -1 --stat
-git status --short
-```
-
-5. If more validation is desired, rerun the focused Task 5 suite before expanding outward.
+4. Review `.superpowers/sdd/final-review-fix-report.md` for the exact final-review fix
+   scope before making more fallback changes.

@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Task 5: Bucket-Level Integration And End-To-End Partial Result
+Fix final branch review findings for OBS interface fallback child filelist handling
 
 ## Current branch
 
@@ -14,43 +14,56 @@ Task 5: Bucket-Level Integration And End-To-End Partial Result
 
 ## User goal
 
-Wire `_scan_bucket()` so local collection failures recorded via `PartialErrorSummary` produce `ScanStatus.PARTIAL_FAILED` with a retained bucket CSV and `partial_errors` in the bucket/application/run manifests, while keeping endpoint/root discovery/aggregation failures as hard failures with `error`.
+Fix the final whole-branch review findings for the OBS interface fallback work:
+roll back incomplete child `filelist` subtrees after paginated failure, sanitize the
+child failure log output, add focused regression coverage, and push the branch.
 
 ## Completed work
 
-- Added the Task 5 bucket-level regression test covering an objectkeys prefix failure that still aggregates a bucket CSV.
-- Added the Task 5 end-to-end manifest regression test covering a partially failed bucket that keeps its CSV and partial error summary.
-- Updated `_scan_bucket()` to pass the existing `PartialErrorSummary` accumulator into `_collect_metadata_files()` and `_collect_prefixes()`.
-- Updated `_scan_bucket()` to emit `partial_failed` instead of `success` when aggregation succeeds but any local collection errors were recorded.
-- Kept hard-failure behavior unchanged for endpoint lookup, root discovery, and aggregation exceptions.
+- Added `FilelistDiscoveryScheduler.rollback_failed_task()` to prune a failed child
+  `filelist` subtree after partial pagination.
+- Removed failed-prefix descendants from discovered prefixes, queued descendant tasks,
+  queued descendant paths, and partial direct-file results before task completion.
+- Kept root `/` `filelist` failures as hard failures; only child task behavior changed.
+- Sanitized child `filelist` failure logs with `_sanitize_reason(...)`.
+- Added a regression test for a child `filelist` task that records page 1 results and
+  fails on page 2, proving the failed subtree is absent from `discovery.prefixes`,
+  `discovery.metadata_files`, and queued work.
+- Added a filelist log sanitization regression proving URLs and token text from the
+  exception are not logged.
+- Appended the requested concise fix report to `.superpowers/sdd/final-review-fix-report.md`.
 
 ## Remaining work
 
-- None for Task 5.
+- No known remaining work for these branch-review findings.
 
 ## Key files changed
 
+- `src/obs_scan_platform/filelist_discovery.py`
 - `src/obs_scan_platform/scanner.py`
+- `src/obs_scan_platform/models.py`
 - `tests/test_scanner.py`
 - `tests/test_scan_end_to_end.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
-- `.superpowers/sdd/task-5-report.md`
+- `.superpowers/sdd/final-review-fix-report.md`
 
 ## Validation commands run
 
-- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_scan_bucket_returns_partial_failed_with_csv_for_objectkeys_failure tests/test_scan_end_to_end.py::test_scanner_run_marks_bucket_partial_failed_and_keeps_csv -q`
-- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_scan_bucket_returns_partial_failed_with_csv_for_objectkeys_failure tests/test_scan_end_to_end.py::test_scanner_run_marks_bucket_partial_failed_and_keeps_csv tests/test_scanner.py::test_scan_bucket_finishes_filelist_and_metadata_before_objectkeys tests/test_scan_end_to_end.py::test_scanner_run_completes_with_mocked_obs_and_directory_csv -q`
+- `& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_discover_root_prunes_partial_child_filelist_results_after_paginated_failure tests/test_scanner.py::test_discover_root_sanitizes_child_filelist_failure_logs -q`
+- `& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_obs_client.py tests/test_scanner.py tests/test_scan_end_to_end.py -q`
 
 ## Validation result
 
-- RED: the new Task 5 tests failed before the scanner change because `_scan_bucket()` still returned `success` after helper-level partial failures.
-- GREEN: the focused Task 5 suite passed after the wiring change: `4 passed in 0.43s`.
+- New rollback/logging regressions: `2 passed in 0.43s`.
+- Required focused scanner suite: `69 passed in 0.89s`.
 
 ## Known risks
 
-- Validation stayed intentionally focused on the exact Task 5 suite from the brief; broader regression coverage was not rerun in this session.
+- `rollback_failed_task()` prunes by failed path prefix. If future scheduling logic
+  stores non-prefix-correlated entries, this method will need to evolve with it.
 
 ## Next recommended action
 
-Proceed to the next queued task or run the broader scanner test suite if you want extra confidence before merging multiple task branches.
+Merge or continue review from the updated branch tip; this fix closes the remaining
+child `filelist` subtree leak and log sanitization findings.

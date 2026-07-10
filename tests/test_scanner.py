@@ -86,6 +86,47 @@ class FailingChildFilelistClient:
         return {"result": {"files": [{"objectType": "folder", "objectKey": "bravo/child/"}], "nextOffset": ""}}
 
 
+class PaginatedFailingChildFilelistClient:
+    def __init__(self):
+        self.calls: list[dict[str, Any]] = []
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        self.calls.append({"url": url, "params": params, "headers": headers})
+        request_body = decode_request_body({"params": params})
+        if request_body["path"] == "/":
+            return {
+                "result": {
+                    "files": [
+                        {"objectType": "folder", "objectKey": "alpha/"},
+                        {"objectType": "folder", "objectKey": "bravo/"},
+                    ],
+                    "nextOffset": "",
+                }
+            }
+        if request_body["path"] == "/alpha/":
+            if request_body["pointer"] == "":
+                return {
+                    "result": {
+                        "files": [
+                            {"objectType": "folder", "objectKey": "alpha/child/"},
+                            {"objectType": "object", "objectKey": "alpha/page-one.txt"},
+                        ],
+                        "nextOffset": "page-2",
+                    }
+                }
+            raise RuntimeError(
+                "child filelist failed for https://obs.example/private/path?token=secret-token&access_token=abc123"
+            )
+        if request_body["path"] == "/bravo/":
+            return {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "bravo/child/"}],
+                    "nextOffset": "",
+                }
+            }
+        return {"result": {"files": [], "nextOffset": ""}}
+
+
 class FailingRootFilelistClient:
     async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
         request_body = decode_request_body({"params": params})
@@ -469,6 +510,27 @@ async def test_discover_root_records_child_filelist_failure_and_continues():
 
 
 @pytest.mark.asyncio
+async def test_discover_root_prunes_partial_child_filelist_results_after_paginated_failure():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 3
+    partial_errors = PartialErrorSummary()
+    client = PaginatedFailingChildFilelistClient()
+
+    discovery = await scanner._discover_root(application, bucket, client, partial_errors=partial_errors)
+
+    assert discovery.prefixes == ["bravo/"]
+    assert discovery.metadata_files == []
+    manifest = partial_errors.to_manifest()
+    assert manifest["filelist_failed_dirs"] == 1
+    assert manifest["samples"][0]["target"] == "/alpha/"
+    requested_paths = [decode_request_body(call)["path"] for call in client.calls]
+    assert "/alpha/" in requested_paths
+    assert "/bravo/" in requested_paths
+    assert "/alpha/child/" not in requested_paths
+    assert "/bravo/child/" in requested_paths
+
+
+@pytest.mark.asyncio
 async def test_discover_root_propagates_root_filelist_failure():
     scanner, application, bucket = make_scanner()
     partial_errors = PartialErrorSummary()
@@ -845,6 +907,24 @@ async def test_discover_root_progress_logs_do_not_include_request_urls(caplog: p
     assert all("http://global-obs.example" not in message for message in messages)
     assert all("requestbody" not in message for message in messages)
     assert all(application.apptoken not in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_discover_root_sanitizes_child_filelist_failure_logs(caplog: pytest.LogCaptureFixture):
+    scanner, application, bucket = make_scanner()
+    partial_errors = PartialErrorSummary()
+    client = PaginatedFailingChildFilelistClient()
+
+    with caplog.at_level(logging.WARNING, logger="obs_scan_platform.scanner"):
+        await scanner._discover_root(application, bucket, client, partial_errors=partial_errors)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("filelist directory failure appid=app.one bucket=bucket-name-1 path=/alpha/" in message for message in messages)
+    assert all("https://obs.example/private/path" not in message for message in messages)
+    assert all("secret-token" not in message for message in messages)
+    assert all("abc123" not in message for message in messages)
+    assert all("token=" not in message for message in messages)
+    assert all("access_token=" not in message for message in messages)
 
 
 @pytest.mark.asyncio

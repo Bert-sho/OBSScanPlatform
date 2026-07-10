@@ -495,15 +495,16 @@ class Scanner:
         except Exception as exc:
             if path == "/":
                 raise
-            scheduler.record_empty(task)
+            scheduler.rollback_failed_task(task)
             if partial_errors is not None:
                 partial_errors.record("filelist", path, exc)
+            sanitized_error = _sanitize_reason(str(exc))
             LOGGER.warning(
                 "filelist directory failure appid=%s bucket=%s path=%s error=%s",
                 application.appid,
                 bucket.name,
                 path,
-                exc,
+                sanitized_error,
             )
         finally:
             scheduler.mark_completed(task)
