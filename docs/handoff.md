@@ -22,7 +22,9 @@
 
 ## Latest commit after this session
 
-`249efb7bb46bdaa5024df3e7e825844fe1bc62dc`
+This handoff is committed with the final review-fix docs. Run `git rev-parse HEAD`
+after checkout for the exact branch-tip hash, because hardcoding it here would change
+the commit ID again.
 
 ## Summary of what changed
 
@@ -75,8 +77,8 @@ Result: `69 passed in 0.89s`.
 
 ## Uncommitted changes, if any
 
-None after commit `249efb7bb46bdaa5024df3e7e825844fe1bc62dc` and push to
-`origin/codex/obs-scan-platform`.
+None expected after the final docs commit and push. Verify with
+`git status --short --branch` on resume.
 
 ## Exact resume instructions for the next Codex session
 
