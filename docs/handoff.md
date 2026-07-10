@@ -22,8 +22,7 @@
 
 ## Latest commit after this session
 
-Pending final commit. The final Codex response must report the actual commit hash after
-the review-fix commit is created and pushed.
+`249efb7bb46bdaa5024df3e7e825844fe1bc62dc`
 
 ## Summary of what changed
 
@@ -76,17 +75,8 @@ Result: `69 passed in 0.89s`.
 
 ## Uncommitted changes, if any
 
-Expected before final commit:
-
-- `src/obs_scan_platform/filelist_discovery.py`
-- `src/obs_scan_platform/scanner.py`
-- `tests/test_scanner.py`
-- `docs/current-task.md`
-- `docs/handoff.md`
-- `.superpowers/sdd/final-review-fix-report.md`
-- deletion of tracked `.superpowers/sdd/task-*-report.md` scratch files
-
-After final commit, `git status --short --branch` should be clean.
+None after commit `249efb7bb46bdaa5024df3e7e825844fe1bc62dc` and push to
+`origin/codex/obs-scan-platform`.
 
 ## Exact resume instructions for the next Codex session
 
