@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-10 18:20:18 +08:00
+2026-07-10 18:32:33 +08:00
 
 ## Machine/environment
 
@@ -18,52 +18,43 @@
 
 ## Latest commit before this session
 
-`8cf00647bd35b47ef1becdc0f85e26c70f9289f6`
+`c26368827f325ef5bdddda4c34dee3ba8ee7b371`
 
 ## Latest commit after this session
 
-Pending final commit from this task. The final Codex response for this session
-must report the actual commit hash after the work is committed.
+Pending final commit from this task. Update this file with the actual hash after commit.
 
 ## Summary of what changed
 
-- Added sanitization in `PartialErrorSummary.record()` so URLs and
-  credential-style query text are removed before sample reasons are written to the
-  manifest.
-- Added a focused regression test that fails before the sanitization fix and
-  passes after it.
-- Removed the now-unused `PartialErrorSummary` import from `src/obs_scan_platform/scanner.py`.
-- Left the rest of Task 1 unchanged.
+- Added child filelist fallback coverage and root filelist hard-failure coverage in `tests/test_scanner.py`.
+- Threaded an optional `PartialErrorSummary` through filelist discovery in `src/obs_scan_platform/scanner.py`.
+- Recorded child filelist failures as partial errors, called `scheduler.record_empty(task)` before completion, and kept root filelist failures as hard failures.
+- Carried the partial-error summary onto `BucketScanResult` so the manifest can surface filelist partials later.
 
 ## Important decisions and rationale
 
-- Kept the change intentionally narrow to Task 1 only.
-- Sanitized at the model boundary in `PartialErrorSummary.record()` so both
-  `OBSRequestError.reason` and generic exception strings are scrubbed before being
-  captured in samples.
-- Only serialized `partial_errors` when the summary has actual recorded failures, so
-  empty summaries do not clutter the manifest.
+- Kept the change scoped to filelist discovery only, matching the Task 2 brief.
+- Used the existing scheduler path removal hook instead of adding new pruning logic.
+- Preserved the root directory behavior as a hard failure so the bucket still fails immediately when the top-level filelist request dies.
 
 ## Failed attempts or rejected approaches
 
-- The sanitizer regression test failed as expected before the fix, which proved the
-  leak existed and gave the red TDD checkpoint.
-- No broader fallback behavior was implemented here; that work is reserved for later
-  tasks in the approved plan.
+- The first targeted pytest run failed before implementation because `_discover_root()` did not accept `partial_errors`.
+- No broader metadata or objectkeys fallback was added here; that remains reserved for later tasks.
 
 ## Current test/build status
 
 Focused validation passed:
 
 ```powershell
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_partial_error_summary_counts_and_caps_samples tests/test_scanner.py::test_partial_error_summary_redacts_urls_and_credential_query_text tests/test_scanner.py::test_bucket_manifest_includes_partial_errors_and_keeps_error_empty tests/test_scanner.py::test_bucket_manifest_temp_dir_cleanup_and_retention -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_discover_root_records_child_filelist_failure_and_continues tests/test_scanner.py::test_discover_root_propagates_root_filelist_failure tests/test_scanner.py::test_discover_root_processes_same_filelist_level_concurrently tests/test_scanner.py::test_discover_root_progress_logs_do_not_include_request_urls -q
 ```
 
-Result: `4 passed in 0.42s`
+Result: `4 passed in 0.43s`
 
 ## Uncommitted changes, if any
 
-Pending commit of the Task 1 code and documentation updates.
+Pending final commit of the Task 2 code and documentation updates.
 
 ## Exact resume instructions for the next Codex session
 
@@ -81,11 +72,11 @@ git diff --stat
 git diff
 ```
 
-3. If Task 1 is not yet committed, stage and commit the current work:
+3. If Task 2 is not yet committed, stage and commit the current work:
 
 ```powershell
-git add src/obs_scan_platform/models.py src/obs_scan_platform/scanner.py tests/test_scanner.py docs/current-task.md docs/handoff.md .superpowers/sdd/task-1-report.md
-git commit -m "fix: sanitize partial error samples"
+git add src/obs_scan_platform/scanner.py tests/test_scanner.py docs/current-task.md docs/handoff.md .superpowers/sdd/task-2-report.md
+git commit -m "feat: continue after child filelist failures"
 ```
 
 4. Push the branch after commit:
@@ -94,4 +85,4 @@ git commit -m "fix: sanitize partial error samples"
 git push -u origin HEAD
 ```
 
-5. Resume the next approved fallback task only after Task 1 is recorded and pushed.
+5. Resume the next approved fallback task only after Task 2 is recorded and pushed.

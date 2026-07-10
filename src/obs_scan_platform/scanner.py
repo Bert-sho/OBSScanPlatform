@@ -18,6 +18,7 @@ from obs_scan_platform.models import (
     BucketInfo,
     BucketScanResult,
     ObjectRow,
+    PartialErrorSummary,
     RootDiscovery,
     ScanStatus,
 )
@@ -287,11 +288,18 @@ class Scanner:
         bucket_started = time.monotonic()
         LOGGER.info("bucket start appid=%s bucket=%s", application.appid, bucket.name)
         thresholds = self.config.thresholds_for(application, bucket.name)
+        partial_errors = PartialErrorSummary()
         temp_dir = results_dir / self.config.scan.temp_subdir / application.appid / bucket.name
         output_path = results_dir / application.appid / f"{bucket.name}.csv"
         try:
             endpoint = await self._get_bucket_endpoint(application, bucket, client)
-            discovery = await self._discover_root(application, bucket, client, thresholds)
+            discovery = await self._discover_root(
+                application,
+                bucket,
+                client,
+                thresholds,
+                partial_errors=partial_errors,
+            )
             await self._collect_metadata_files(application, bucket, endpoint, discovery.metadata_files, temp_dir, client)
             await self._collect_prefixes(application, bucket, endpoint, discovery.prefixes, temp_dir, client)
             aggregate_bucket(
@@ -320,6 +328,7 @@ class Scanner:
                 csv_path=None,
                 thresholds=thresholds,
                 error=str(exc),
+                partial_errors=partial_errors if partial_errors.has_errors() else None,
             )
 
         elapsed_seconds = time.monotonic() - bucket_started
@@ -337,6 +346,7 @@ class Scanner:
             status=ScanStatus.SUCCESS,
             csv_path=output_path,
             thresholds=thresholds,
+            partial_errors=partial_errors if partial_errors.has_errors() else None,
         )
 
     async def _get_bucket_endpoint(
@@ -368,6 +378,7 @@ class Scanner:
         bucket: BucketInfo,
         client: OBSClient,
         thresholds: Thresholds | None = None,
+        partial_errors: PartialErrorSummary | None = None,
     ) -> RootDiscovery:
         thresholds = thresholds or self.config.thresholds_for(application, bucket.name)
         max_depth = max(1, thresholds.filelist_depth)
@@ -394,6 +405,7 @@ class Scanner:
                             task,
                             url,
                             progress_bar,
+                            partial_errors,
                         )
                         for task in tasks
                     )
@@ -418,59 +430,74 @@ class Scanner:
         task: FilelistTask,
         url: str,
         progress_bar: Any | None,
+        partial_errors: PartialErrorSummary | None,
     ) -> None:
         path = task.path
-        pointer = ""
-        while True:
-            request_body = encode_request_body(
-                {
-                    "id": bucket.bucket_id,
-                    "path": path,
-                    "pointer": pointer,
-                    "size": self.config.scan.page_size,
-                }
+        try:
+            pointer = ""
+            while True:
+                request_body = encode_request_body(
+                    {
+                        "id": bucket.bucket_id,
+                        "path": path,
+                        "pointer": pointer,
+                        "size": self.config.scan.page_size,
+                    }
+                )
+                data = await client.get_json(
+                    url,
+                    params={"appid": application.appid, "requestbody": request_body},
+                    headers={**JSON_HEADERS, "csb-token": application.apptoken},
+                    endpoint="filelist",
+                )
+                payload = _result_payload(data)
+                if _has_empty_filelist_objects(payload):
+                    scheduler.record_empty(task)
+                    break
+
+                for item in _items_from_payload(payload, "objects", "files", "list", "items"):
+                    object_type = str(item.get("objectType") or "").lower()
+                    object_key = item.get("objectKey")
+                    if object_type == "folder":
+                        prefix = self._filelist_folder_prefix(path, object_key or item.get("name"))
+                        if prefix:
+                            scheduler.record_folder(task, prefix)
+                            if progress_bar is not None and progress_bar.total != scheduler.pending_total_tasks:
+                                progress_bar.total = scheduler.pending_total_tasks
+                                progress_bar.refresh()
+                    elif object_key:
+                        scheduler.record_file(task, str(object_key))
+
+                next_pointer = None
+                if isinstance(payload, dict):
+                    next_pointer = str(payload.get("nextOffset") or "")
+                if not next_pointer or next_pointer == pointer:
+                    break
+                pointer = next_pointer
+        except Exception as exc:
+            if path == "/":
+                raise
+            scheduler.record_empty(task)
+            if partial_errors is not None:
+                partial_errors.record("filelist", path, exc)
+            LOGGER.warning(
+                "filelist directory failure appid=%s bucket=%s path=%s error=%s",
+                application.appid,
+                bucket.name,
+                path,
+                exc,
             )
-            data = await client.get_json(
-                url,
-                params={"appid": application.appid, "requestbody": request_body},
-                headers={**JSON_HEADERS, "csb-token": application.apptoken},
-                endpoint="filelist",
+        finally:
+            scheduler.mark_completed(task)
+            LOGGER.info(
+                "filelist progress appid=%s bucket=%s completed=%s total=%s",
+                application.appid,
+                bucket.name,
+                scheduler.completed_tasks,
+                scheduler.pending_total_tasks,
             )
-            payload = _result_payload(data)
-            if _has_empty_filelist_objects(payload):
-                scheduler.record_empty(task)
-                break
-
-            for item in _items_from_payload(payload, "objects", "files", "list", "items"):
-                object_type = str(item.get("objectType") or "").lower()
-                object_key = item.get("objectKey")
-                if object_type == "folder":
-                    prefix = self._filelist_folder_prefix(path, object_key or item.get("name"))
-                    if prefix:
-                        scheduler.record_folder(task, prefix)
-                        if progress_bar is not None and progress_bar.total != scheduler.pending_total_tasks:
-                            progress_bar.total = scheduler.pending_total_tasks
-                            progress_bar.refresh()
-                elif object_key:
-                    scheduler.record_file(task, str(object_key))
-
-            next_pointer = None
-            if isinstance(payload, dict):
-                next_pointer = str(payload.get("nextOffset") or "")
-            if not next_pointer or next_pointer == pointer:
-                break
-            pointer = next_pointer
-
-        scheduler.mark_completed(task)
-        LOGGER.info(
-            "filelist progress appid=%s bucket=%s completed=%s total=%s",
-            application.appid,
-            bucket.name,
-            scheduler.completed_tasks,
-            scheduler.pending_total_tasks,
-        )
-        if progress_bar is not None:
-            progress_bar.update(1)
+            if progress_bar is not None:
+                progress_bar.update(1)
 
     def _filelist_progress_bar(self, application: ApplicationConfig, bucket: BucketInfo, total: int) -> Any | None:
         if not self.show_progress:

@@ -64,6 +64,35 @@ class RepeatingRootOffsetClient:
         return {"result": {"files": [], "nextOffset": 1}}
 
 
+class FailingChildFilelistClient:
+    def __init__(self):
+        self.calls: list[dict[str, Any]] = []
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        self.calls.append({"url": url, "params": params, "headers": headers})
+        request_body = decode_request_body({"params": params})
+        if request_body["path"] == "/":
+            return {
+                "result": {
+                    "files": [
+                        {"objectType": "folder", "objectKey": "alpha/"},
+                        {"objectType": "folder", "objectKey": "bravo/"},
+                    ],
+                    "nextOffset": "",
+                }
+            }
+        if request_body["path"] == "/alpha/":
+            raise RuntimeError("child filelist failed")
+        return {"result": {"files": [{"objectType": "folder", "objectKey": "bravo/child/"}], "nextOffset": ""}}
+
+
+class FailingRootFilelistClient:
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        request_body = decode_request_body({"params": params})
+        assert request_body["path"] == "/"
+        raise RuntimeError("root filelist failed")
+
+
 class PhaseOrderClient:
     def __init__(self):
         self.phase_events: list[str] = []
@@ -419,6 +448,40 @@ async def test_discover_root_recurses_to_filelist_depth_and_finds_nested_prefixe
     assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/"]
     assert discovery.prefixes == ["alpha/"]
     assert discovery.root_files == ["root.txt"]
+
+
+@pytest.mark.asyncio
+async def test_discover_root_records_child_filelist_failure_and_continues():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 3
+    partial_errors = PartialErrorSummary()
+    client = FailingChildFilelistClient()
+
+    discovery = await scanner._discover_root(application, bucket, client, partial_errors=partial_errors)
+
+    assert discovery.prefixes == ["bravo/"]
+    assert partial_errors.to_manifest()["filelist_failed_dirs"] == 1
+    assert partial_errors.to_manifest()["samples"][0]["target"] == "/alpha/"
+    requested_paths = [decode_request_body(call)["path"] for call in client.calls]
+    assert "/alpha/" in requested_paths
+    assert "/bravo/" in requested_paths
+    assert "/alpha/child/" not in requested_paths
+
+
+@pytest.mark.asyncio
+async def test_discover_root_propagates_root_filelist_failure():
+    scanner, application, bucket = make_scanner()
+    partial_errors = PartialErrorSummary()
+
+    with pytest.raises(RuntimeError, match="root filelist failed"):
+        await scanner._discover_root(
+            application,
+            bucket,
+            FailingRootFilelistClient(),
+            partial_errors=partial_errors,
+        )
+
+    assert not partial_errors.has_errors()
 
 
 @pytest.mark.asyncio
