@@ -37,6 +37,14 @@ def _json_failure_reason(data: dict[str, Any]) -> str:
     return str(data.get("msg") or data.get("message") or data.get("error") or "OBS returned success=false")[:200]
 
 
+def _has_empty_filelist_objects(data: dict[str, Any]) -> bool:
+    payload = data.get("result")
+    if not isinstance(payload, dict):
+        payload = data
+    objects = payload.get("objects")
+    return isinstance(objects, dict) and not objects
+
+
 def encode_request_body(payload: dict[str, Any]) -> str:
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("utf-8")
@@ -85,6 +93,8 @@ class OBSClient:
                 data = response.json()
                 success = data.get("success")
                 if success in (False, "false"):
+                    if endpoint == "filelist" and _has_empty_filelist_objects(data):
+                        return data
                     raise OBSRequestError(
                         endpoint=endpoint,
                         status_code=response.status_code,

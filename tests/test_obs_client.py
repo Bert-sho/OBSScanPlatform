@@ -304,3 +304,29 @@ async def test_get_json_success_false_error_is_sanitized():
         await client.close()
 
     assert str(exc_info.value) == "OBS request failed endpoint=metadata status=200 reason=permission denied"
+
+
+@pytest.mark.asyncio
+async def test_get_json_returns_empty_filelist_objects_even_when_success_false():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"success": False, "msg": "", "objects": {}})
+
+    client = OBSClient(
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
+        request_semaphore=asyncio.Semaphore(1),
+        max_retries=3,
+        retry_base_delay_seconds=0,
+        retry_max_delay_seconds=0,
+    )
+
+    try:
+        data = await client.get_json("http://obs.example/test", params={}, endpoint="filelist")
+    finally:
+        await client.close()
+
+    assert data == {"success": False, "msg": "", "objects": {}}
+    assert calls == 1

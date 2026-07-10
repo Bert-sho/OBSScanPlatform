@@ -2,15 +2,16 @@
 
 ## Timestamp
 
-2026-07-10 12:31:05 CST
+2026-07-10 15:19:20 +08:00
 
 ## Machine/environment
 
-- Codex desktop app on macOS.
-- Worktree: `/Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform`
+- Codex desktop app on Windows.
+- Workspace: `D:\code\OBSScanPlatform`
 - Branch: `codex/obs-scan-platform`
 - Timezone: Asia/Shanghai
-- Git binary used: `/opt/homebrew/bin/git`
+- Bundled Python used for validation: `C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe`
+- Default `python`, `py`, and `pytest` were not usable from PATH; dev dependencies were installed into the bundled Python with `python.exe -m pip install -e '.[dev]'`.
 
 ## Current branch
 
@@ -18,106 +19,121 @@
 
 ## Latest commit before this session
 
-`2427c3c773cc3861d8cfc5eeb3501ec62c4a7857`
+`06e6fb780e652e0a960cc8d8add899930da4141c`
 
 ## Latest commit after this session
 
-Task 6 final documentation commit will be the branch HEAD created after this file is committed. Confirm with:
-
-```bash
-/opt/homebrew/bin/git rev-parse HEAD
-```
+Pending final commit. The final Codex response for this session must report the actual commit hash after committing these changes.
 
 ## Summary of what changed
 
-- Updated `README.md` and `docs/scan-start-guide.md` with final operator-facing behavior notes:
-  - default global request concurrency is `150`;
-  - default per-bucket objectkeys concurrency is `30`;
-  - `scan.objectkeys_concurrency_per_bucket` is preferred over legacy `scan.per_bucket_prefix_concurrency`;
-  - terminal output and `scan.log` avoid full OBS URLs, query strings, request bodies, and tokens;
-  - request failures still expose safe endpoint/status/reason diagnostics;
-  - each bucket runs filelist and metadata before objectkeys;
-  - `scan_shared_buckets: true` includes scan-capable shared buckets;
-  - `scan.filelist_task_limit_per_bucket` controls deeper recursion and does not truncate the current level.
-- Replaced `docs/current-task.md` with final completed-task state for the OBS scanner behavior corrections.
-- Replaced this handoff with final validation and resume instructions for the next AI agent.
+- `OBSClient.get_json()` now returns OBS `filelist` responses with an empty `objects={}` payload instead of retrying and raising `OBSRequestError`, even when the OBS response uses `success=false`.
+- `FilelistDiscoveryScheduler.record_empty()` removes the corresponding discovered prefix when a scanned child directory returns the empty `objects={}` sentinel.
+- `_discover_root()` now dispatches all filelist tasks in the current hierarchy level via `asyncio.gather`, while each directory still paginates sequentially using `nextOffset`.
+- Filelist item parsing now checks `objects` before legacy/local test keys such as `files`.
+- Bucket listing now combines known owned/shared bucket list fields, including `buckets`, `bucketList`, `sharedBuckets`, and related variants, so `scan_shared_buckets: true` can include shared bucket records returned separately.
+- `configure_logging()` raises `httpx` and `httpcore` loggers to `WARNING`, preventing INFO request logs from filling `scan.log` with full URLs.
+- Added targeted regression tests in `tests/test_obs_client.py` and `tests/test_scanner.py`.
+- Added Python cache ignore rules to `.gitignore` so generated `__pycache__` files are not accidentally committed after validation.
+- Added plan file `docs/superpowers/plans/2026-07-10-obs-scan-debug-fixes.md`.
 
 ## Important decisions and rationale
 
-- No code changes were needed in Task 6 because Tasks 1-5 already implemented and reviewed the required behavior.
-- Documentation was kept operator-facing and aligned with existing CLI/FastAPI guidance.
-- The final bucket CSV schema remains unchanged; object-level rows remain temporary scanner implementation details.
-- Erroneous OBS empty-bucket API failures remain real failures, matching the explicit user decision not to mask those API errors.
+- The empty `objects={}` handling is restricted to `endpoint="filelist"` so metadata/objectkeys/listbuckets failures are still treated as real OBS request failures.
+- The scanner only skips `objectkeys` for the explicit empty-dict sentinel. Existing empty-list filelist behavior is preserved because previous tests model empty folders with `files: []`.
+- Same-level concurrency is implemented inside the existing level scheduler instead of adding new configuration. The existing global request semaphore still bounds total outgoing requests.
+- Full-suite Windows failures were not fixed here because they are unrelated platform/test assumptions and would broaden this scanner-specific change.
 
 ## Failed attempts or rejected approaches
 
-- None in Task 6. Earlier review fixes are already committed in prior Task 4 and Task 5 commits.
-- I did not add API parameters or streaming progress because the approved plan explicitly kept FastAPI request parameters stable.
+- `pytest ...` failed initially because `pytest` was not on PATH.
+- `python -m pytest ...` failed initially because the default `python` launcher was not usable in this shell.
+- Installed project dev dependencies into Codex bundled Python and used that executable for validation.
+- Full `pytest -q` failed with six apparent pre-existing Windows/platform issues:
+  - unescaped Windows path in pytest regex match;
+  - Windows symlink privilege denial in two API tests;
+  - CRLF vs LF text assertion;
+  - backslash path segment semantics on Windows;
+  - CLI test expecting POSIX path separators.
+- Did not change unrelated API, CLI, aggregation, or platform tests.
 
 ## Current test/build status
 
-- Targeted regression suite:
+Focused scanner validation:
 
-```bash
-pytest tests/test_config.py tests/test_obs_client.py tests/test_scanner.py tests/test_scan_end_to_end.py -v
+```powershell
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_obs_client.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
 ```
 
-Result: 53 passed.
+Result: `51 passed in 0.86s`.
 
-- Full test suite:
+Full suite:
 
-```bash
-pytest -q
+```powershell
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest -q
 ```
 
-Result: 97 passed, 1 third-party FastAPI/TestClient deprecation warning.
+Result: `98 passed, 6 failed, 1 warning`.
 
 ## Uncommitted changes, if any
 
-Before the final Task 6 commit, expected tracked changes are:
+Expected before final commit:
 
-- `README.md`
-- `docs/scan-start-guide.md`
+- `src/obs_scan_platform/obs_client.py`
+- `src/obs_scan_platform/filelist_discovery.py`
+- `src/obs_scan_platform/logging_config.py`
+- `src/obs_scan_platform/scanner.py`
+- `.gitignore`
+- `tests/test_obs_client.py`
+- `tests/test_scanner.py`
+- `docs/superpowers/plans/2026-07-10-obs-scan-debug-fixes.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
-Generated Python `__pycache__` directories may appear after tests; remove them before committing:
+Generated `__pycache__` directories can reappear after tests. Remove them before committing.
 
-```bash
-rm -rf src/obs_scan_platform/__pycache__ tests/__pycache__
+## Exact resume instructions for the next Codex session
+
+1. Enter the workspace:
+
+```powershell
+cd D:\code\OBSScanPlatform
 ```
 
-`.superpowers/` scratch files must remain untracked. Verify with:
+2. Confirm branch and diff:
 
-```bash
-/opt/homebrew/bin/git ls-files .superpowers
+```powershell
+git status --short --branch
+git diff --stat
+git diff
 ```
 
-## Exact resume instructions
+3. Remove generated caches if present:
 
-1. Enter the worktree:
-
-```bash
-cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
+```powershell
+$workspace = (Resolve-Path '.').Path
+$targets = @('src/obs_scan_platform/__pycache__','tests/__pycache__')
+foreach ($target in $targets) {
+  if (Test-Path -LiteralPath $target) {
+    $resolved = (Resolve-Path -LiteralPath $target).Path
+    if (-not $resolved.StartsWith($workspace, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "Refusing to remove outside workspace: $resolved"
+    }
+    Remove-Item -LiteralPath $resolved -Recurse -Force
+  }
+}
 ```
 
-2. Confirm branch state:
+4. Re-run focused validation:
 
-```bash
-/opt/homebrew/bin/git status --short --branch
-/opt/homebrew/bin/git rev-parse HEAD
+```powershell
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_obs_client.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
 ```
 
-3. If the final Task 6 commit has not been made yet, run:
+5. Commit and push if validation status is acceptable:
 
-```bash
-rm -rf src/obs_scan_platform/__pycache__ tests/__pycache__
-/opt/homebrew/bin/git status
-/opt/homebrew/bin/git diff --stat
-/opt/homebrew/bin/git diff
-/opt/homebrew/bin/git add README.md docs/scan-start-guide.md docs/current-task.md docs/handoff.md
-/opt/homebrew/bin/git commit -m "docs: update scan behavior handoff"
-/opt/homebrew/bin/git push -u origin HEAD
+```powershell
+git add .
+git commit -m "wip: correct obs scan filelist edge cases"
+git push -u origin HEAD
 ```
-
-4. If more scanner behavior changes are requested later, start from the pushed `codex/obs-scan-platform` branch and do not revert completed Task 1-5 commits.

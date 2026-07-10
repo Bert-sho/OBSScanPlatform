@@ -55,6 +55,11 @@ class FilelistDiscoveryScheduler:
         if object_key:
             self._direct_files.append(str(object_key))
 
+    def record_empty(self, task: FilelistTask) -> None:
+        prefix = task.path.strip("/")
+        if prefix:
+            self._discovered_prefixes.discard(f"{prefix}/")
+
     def mark_completed(self, task: FilelistTask) -> None:
         self._scanned_paths.add(task.path)
         self._completed_tasks += 1

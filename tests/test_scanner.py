@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds
+from obs_scan_platform.logging_config import configure_logging
 from obs_scan_platform.models import BucketInfo, BucketScanResult, ScanStatus
 from obs_scan_platform.paths import prefix_temp_filename
 from obs_scan_platform.scanner import (
@@ -235,6 +236,44 @@ async def test_list_buckets_uses_global_endpoint_and_includes_shared_when_enable
 
 
 @pytest.mark.asyncio
+async def test_list_buckets_includes_shared_bucket_lists_when_enabled():
+    scanner, application, _ = make_scanner()
+    application.scan_shared_buckets = True
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "buckets": [
+                        {
+                            "id": "owned-id",
+                            "name": "owned-bucket",
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "owner",
+                            "shareFrom": None,
+                        }
+                    ],
+                    "sharedBuckets": [
+                        {
+                            "id": "shared-id",
+                            "name": "shared-bucket",
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "reader",
+                            "shareFrom": "other-app",
+                        }
+                    ],
+                }
+            }
+        ]
+    )
+
+    buckets = await scanner._list_buckets(application, client)
+
+    assert [bucket.name for bucket in buckets] == ["owned-bucket", "shared-bucket"]
+
+
+@pytest.mark.asyncio
 async def test_list_buckets_logs_skip_for_missing_required_shared_bucket(caplog: pytest.LogCaptureFixture):
     scanner, application, _ = make_scanner()
     application.scan_shared_buckets = True
@@ -296,6 +335,30 @@ async def test_discover_root_uses_bucket_filelist_and_parses_first_level_items()
     call = client.calls[0]
     assert call["url"].startswith("http://global-obs.example/")
     assert call["url"].endswith("/rest/s3/bucket/filelist")
+    assert discovery.prefixes == ["alpha/"]
+    assert discovery.root_files == ["root.txt"]
+
+
+@pytest.mark.asyncio
+async def test_discover_root_parses_documented_objects_key():
+    scanner, application, bucket = make_scanner()
+    client = FakeClient(
+        [
+            {
+                "success": True,
+                "files": [],
+                "objects": [
+                    {"objectType": "folder", "objectKey": "alpha/nested/"},
+                    {"objectType": "object", "objectKey": "root.txt"},
+                ],
+                "nextOffset": "",
+            },
+            {"success": True, "files": [], "objects": [], "nextOffset": ""},
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
     assert discovery.prefixes == ["alpha/"]
     assert discovery.root_files == ["root.txt"]
 
@@ -616,6 +679,39 @@ async def test_discover_root_does_not_return_non_root_objects_as_root_files():
 
 
 @pytest.mark.asyncio
+async def test_discover_root_processes_same_filelist_level_concurrently():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    client = ConcurrentFakeClient(
+        [
+            {
+                "result": {
+                    "files": [
+                        {"objectType": "folder", "objectKey": "alpha/"},
+                        {"objectType": "folder", "objectKey": "bravo/"},
+                        {"objectType": "folder", "objectKey": "charlie/"},
+                    ],
+                    "nextOffset": "",
+                }
+            },
+            {"result": {"files": [], "nextOffset": ""}},
+            {"result": {"files": [], "nextOffset": ""}},
+            {"result": {"files": [], "nextOffset": ""}},
+        ]
+    )
+
+    await scanner._discover_root(application, bucket, client)
+
+    assert client.max_active > 1
+    assert sorted(decode_request_body(call)["path"] for call in client.calls) == [
+        "/",
+        "/alpha/",
+        "/bravo/",
+        "/charlie/",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_discover_root_stops_on_repeated_numeric_next_offset():
     scanner, application, bucket = make_scanner()
     client = RepeatingRootOffsetClient()
@@ -623,6 +719,51 @@ async def test_discover_root_stops_on_repeated_numeric_next_offset():
     await asyncio.wait_for(scanner._discover_root(application, bucket, client), timeout=1)
 
     assert len(client.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_scan_bucket_treats_empty_filelist_objects_as_empty_bucket(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    client = FakeClient(
+        [
+            {"result": "http://bucket-endpoint/"},
+            {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "empty/"}],
+                    "nextOffset": "",
+                }
+            },
+            {"result": {"objects": {}, "nextOffset": ""}},
+            {"result": {"objectkeys": [], "truncated": "false"}},
+        ]
+    )
+
+    result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+
+    assert result.status == ScanStatus.SUCCESS
+    assert [call["url"].rsplit("/", 1)[-1] for call in client.calls] == ["endpoint", "filelist", "filelist"]
+
+
+def test_configure_logging_suppresses_httpx_request_url_logs(tmp_path: Path):
+    configure_logging(tmp_path / "scan.log")
+
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+    assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.WARNING
+
+
+@pytest.mark.asyncio
+async def test_discover_root_progress_logs_do_not_include_request_urls(caplog: pytest.LogCaptureFixture):
+    scanner, application, bucket = make_scanner()
+    client = FakeClient([{"result": {"files": [], "nextOffset": ""}}])
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        await scanner._discover_root(application, bucket, client)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("filelist progress appid=app.one bucket=bucket-name-1" in message for message in messages)
+    assert all("http://global-obs.example" not in message for message in messages)
+    assert all("requestbody" not in message for message in messages)
+    assert all(application.apptoken not in message for message in messages)
 
 
 @pytest.mark.asyncio

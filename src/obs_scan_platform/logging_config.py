@@ -14,3 +14,5 @@ def configure_logging(log_path: Path | None = None) -> None:
         handlers=handlers,
         force=True,
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)

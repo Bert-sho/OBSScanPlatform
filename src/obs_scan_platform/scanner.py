@@ -12,7 +12,7 @@ import httpx
 from obs_scan_platform.aggregation import aggregate_bucket
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds, load_config
 from obs_scan_platform.csv_store import append_object_rows
-from obs_scan_platform.filelist_discovery import FilelistDiscoveryScheduler
+from obs_scan_platform.filelist_discovery import FilelistDiscoveryScheduler, FilelistTask
 from obs_scan_platform.logging_config import configure_logging
 from obs_scan_platform.models import BucketInfo, BucketScanResult, ObjectRow, RootDiscovery, ScanStatus
 from obs_scan_platform.obs_client import OBSClient, encode_object_key, encode_request_body
@@ -77,6 +77,34 @@ def _items_from_payload(payload: Any, *keys: str) -> list[dict[str, Any]]:
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
     return []
+
+
+def _bucket_items_from_payload(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+    items: list[dict[str, Any]] = []
+    known_keys = (
+        "buckets",
+        "bucketList",
+        "list",
+        "sharedBuckets",
+        "shareBuckets",
+        "sharedBucketList",
+        "shareBucketList",
+    )
+    for key in known_keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            items.extend(item for item in value if isinstance(item, dict))
+    if items:
+        return items
+    return _items_from_payload(payload)
+
+
+def _has_empty_filelist_objects(payload: Any) -> bool:
+    return isinstance(payload, dict) and isinstance(payload.get("objects"), dict) and not payload["objects"]
 
 
 def _string_or_empty(value: Any) -> str:
@@ -196,7 +224,7 @@ class Scanner:
             endpoint="listbuckets",
         )
         buckets: list[BucketInfo] = []
-        for item in _items_from_payload(_result_payload(data), "buckets", "bucketList", "list"):
+        for item in _bucket_items_from_payload(_result_payload(data)):
             bucket = BucketInfo(
                 bucket_id=_string_or_empty(item.get("id")),
                 name=_string_or_empty(item.get("name")),
@@ -327,55 +355,20 @@ class Scanner:
                 tasks = scheduler.current_level()
                 if not tasks:
                     break
-                for task in tasks:
-                    path = task.path
-                    pointer = ""
-                    while True:
-                        request_body = encode_request_body(
-                            {
-                                "id": bucket.bucket_id,
-                                "path": path,
-                                "pointer": pointer,
-                                "size": self.config.scan.page_size,
-                            }
-                        )
-                        data = await client.get_json(
+                await asyncio.gather(
+                    *(
+                        self._process_filelist_task(
+                            application,
+                            bucket,
+                            client,
+                            scheduler,
+                            task,
                             url,
-                            params={"appid": application.appid, "requestbody": request_body},
-                            headers={**JSON_HEADERS, "csb-token": application.apptoken},
-                            endpoint="filelist",
+                            progress_bar,
                         )
-                        payload = _result_payload(data)
-                        for item in _items_from_payload(payload, "files", "list", "items"):
-                            object_type = str(item.get("objectType") or "").lower()
-                            object_key = item.get("objectKey")
-                            if object_type == "folder":
-                                prefix = self._filelist_folder_prefix(path, object_key or item.get("name"))
-                                if prefix:
-                                    scheduler.record_folder(task, prefix)
-                                    if progress_bar is not None and progress_bar.total != scheduler.pending_total_tasks:
-                                        progress_bar.total = scheduler.pending_total_tasks
-                                        progress_bar.refresh()
-                            elif object_key:
-                                scheduler.record_file(task, str(object_key))
-
-                        next_pointer = None
-                        if isinstance(payload, dict):
-                            next_pointer = str(payload.get("nextOffset") or "")
-                        if not next_pointer or next_pointer == pointer:
-                            break
-                        pointer = next_pointer
-
-                    scheduler.mark_completed(task)
-                    LOGGER.info(
-                        "filelist progress appid=%s bucket=%s completed=%s total=%s",
-                        application.appid,
-                        bucket.name,
-                        scheduler.completed_tasks,
-                        scheduler.pending_total_tasks,
+                        for task in tasks
                     )
-                    if progress_bar is not None:
-                        progress_bar.update(1)
+                )
                 if not scheduler.finish_level():
                     break
                 if progress_bar is not None:
@@ -386,6 +379,69 @@ class Scanner:
                 progress_bar.close()
 
         return scheduler.result()
+
+    async def _process_filelist_task(
+        self,
+        application: ApplicationConfig,
+        bucket: BucketInfo,
+        client: OBSClient,
+        scheduler: FilelistDiscoveryScheduler,
+        task: FilelistTask,
+        url: str,
+        progress_bar: Any | None,
+    ) -> None:
+        path = task.path
+        pointer = ""
+        while True:
+            request_body = encode_request_body(
+                {
+                    "id": bucket.bucket_id,
+                    "path": path,
+                    "pointer": pointer,
+                    "size": self.config.scan.page_size,
+                }
+            )
+            data = await client.get_json(
+                url,
+                params={"appid": application.appid, "requestbody": request_body},
+                headers={**JSON_HEADERS, "csb-token": application.apptoken},
+                endpoint="filelist",
+            )
+            payload = _result_payload(data)
+            if _has_empty_filelist_objects(payload):
+                scheduler.record_empty(task)
+                break
+
+            for item in _items_from_payload(payload, "objects", "files", "list", "items"):
+                object_type = str(item.get("objectType") or "").lower()
+                object_key = item.get("objectKey")
+                if object_type == "folder":
+                    prefix = self._filelist_folder_prefix(path, object_key or item.get("name"))
+                    if prefix:
+                        scheduler.record_folder(task, prefix)
+                        if progress_bar is not None and progress_bar.total != scheduler.pending_total_tasks:
+                            progress_bar.total = scheduler.pending_total_tasks
+                            progress_bar.refresh()
+                elif object_key:
+                    scheduler.record_file(task, str(object_key))
+
+            next_pointer = None
+            if isinstance(payload, dict):
+                next_pointer = str(payload.get("nextOffset") or "")
+            if not next_pointer or next_pointer == pointer:
+                break
+            pointer = next_pointer
+
+        scheduler.mark_completed(task)
+        LOGGER.info(
+            "filelist progress appid=%s bucket=%s completed=%s total=%s",
+            application.appid,
+            bucket.name,
+            scheduler.completed_tasks,
+            scheduler.pending_total_tasks,
+        )
+        if progress_bar is not None:
+            progress_bar.update(1)
 
     def _filelist_progress_bar(self, application: ApplicationConfig, bucket: BucketInfo, total: int) -> Any | None:
         if not self.show_progress:
