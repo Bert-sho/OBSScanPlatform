@@ -17,11 +17,11 @@
 
 ## Latest commit before this session
 
-`b9f67dc8e1fa5c12fcd7b107c75c975508bd29c2`
+`ee4f0070e2add01744a28f4c6b93eb93777330bb`
 
 ## Latest commit after this session
 
-Task 4 review-fix commit will be the branch HEAD created in this session. Confirm with:
+Task 4 RootDiscovery compatibility fix commit will be the branch HEAD created in this session. Confirm with:
 
 ```bash
 /opt/homebrew/bin/git rev-parse HEAD
@@ -35,6 +35,8 @@ Task 4 review-fix commit will be the branch HEAD created in this session. Confir
 - Refactored `scanner._discover_root()` to scan the full current level before deciding whether to enqueue the next level, and to exclude objectkeys-covered files from metadata collection.
 - Fixed the Task 4 review finding where scan.log and tqdm total included next-level candidate tasks even when `filelist_task_limit_per_bucket` meant that level would be discarded.
 - Added regression tests for scan.log and tqdm totals when root discovers a child folder but `filelist_task_limit_per_bucket=1` prevents scanning that child folder.
+- Fixed the Task 4 review finding where `RootDiscovery(prefixes=..., root_files=...)` no longer worked after adding `metadata_files`.
+- Added a model regression test proving the legacy `root_files=` constructor still maps to `metadata_files` and the `root_files` property.
 - Wrote the local-only implementation note at `.superpowers/sdd/task-4-report.md`; this file must remain outside git.
 
 ## Important decisions and rationale
@@ -44,11 +46,13 @@ Task 4 review-fix commit will be the branch HEAD created in this session. Confir
 - Metadata candidates are gathered from all direct filelist objects first and filtered against the final selected top-level prefixes, so nested files discovered during recursion do not trigger redundant metadata fetches.
 - I kept `root_files` as a read-only compatibility property to avoid unnecessary collateral changes outside Task 4 scope.
 - Progress totals use `pending_total_tasks` only for next-level tasks that will actually be accepted. If the scheduler has already reached the task threshold, candidate next-level tasks remain discovered prefixes but are not counted in progress totals.
+- `RootDiscovery` now has a custom frozen dataclass initializer so both new `metadata_files=` and legacy `root_files=` construction styles work, while the stored field remains `metadata_files`.
 
 ## Failed attempts or rejected approaches
 
 - The first implementation passed the new focused tests but regressed the existing progress-log assertion because the first log line still reported `total=1`. I fixed that by exposing `pending_total_tasks` from the scheduler so progress logging and the progress bar can reflect newly discovered same-batch work before the level flips.
 - Task 4 review then found the opposite boundary: `pending_total_tasks` also counted candidate next-level tasks that would later be discarded when `filelist_task_limit_per_bucket` had already been reached. I fixed that by making `pending_total_tasks` conditional on the next level being accepted.
+- Final Task 4 review found that a property alias alone did not preserve constructor compatibility for `RootDiscovery(root_files=...)`. I added an explicit initializer instead of reverting the new `metadata_files` field.
 - I did not rename broader scanner metadata plumbing or add new end-to-end cases because the Task 4 brief limited the writable surface to the scheduler/model/scanner/tests/docs files listed above.
 
 ## Current test/build status
@@ -66,6 +70,11 @@ Task 4 review-fix commit will be the branch HEAD created in this session. Confir
   - Result: 2 passed
   - `pytest tests/test_scanner.py -v`
   - Result: 28 passed
+- GREEN evidence after RootDiscovery compatibility fix:
+  - `pytest tests/test_models.py -v`
+  - Result: 2 passed
+  - `pytest tests/test_scanner.py -v`
+  - Result: 28 passed
 - GREEN repository checks after docs update:
   - `/opt/homebrew/bin/git diff --check`
   - Result: clean
@@ -74,7 +83,7 @@ Task 4 review-fix commit will be the branch HEAD created in this session. Confir
 
 ## Uncommitted changes, if any
 
-- Before commit, the worktree should contain only the Task 4 review-fix source/test/docs changes plus the local untracked `.superpowers/sdd/task-4-report.md`. Verify with:
+- Before commit, the worktree should contain only the Task 4 compatibility-fix source/test/docs changes plus the local untracked `.superpowers/sdd/task-4-report.md`. Verify with:
 
 ```bash
 /opt/homebrew/bin/git status --short --branch

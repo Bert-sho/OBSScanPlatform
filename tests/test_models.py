@@ -1,5 +1,12 @@
 from obs_scan_platform.config import Thresholds
-from obs_scan_platform.models import DirectoryStats, ObjectRow
+from obs_scan_platform.models import DirectoryStats, ObjectRow, RootDiscovery
+
+
+def test_root_discovery_accepts_legacy_root_files_constructor():
+    discovery = RootDiscovery(prefixes=["alpha/"], root_files=["root.txt"])
+
+    assert discovery.metadata_files == ["root.txt"]
+    assert discovery.root_files == ["root.txt"]
 
 
 def test_directory_stats_add_object_accumulates_counts_and_sizes():

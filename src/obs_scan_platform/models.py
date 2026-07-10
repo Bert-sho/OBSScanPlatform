@@ -23,10 +23,21 @@ class BucketInfo:
     share_from: str | None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class RootDiscovery:
     prefixes: list[str]
     metadata_files: list[str]
+
+    def __init__(
+        self,
+        prefixes: list[str],
+        metadata_files: list[str] | None = None,
+        root_files: list[str] | None = None,
+    ) -> None:
+        if metadata_files is None:
+            metadata_files = root_files or []
+        object.__setattr__(self, "prefixes", prefixes)
+        object.__setattr__(self, "metadata_files", metadata_files)
 
     @property
     def root_files(self) -> list[str]:
