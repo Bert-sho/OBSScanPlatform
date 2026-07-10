@@ -21,6 +21,7 @@ from obs_scan_platform.models import (
     PartialErrorSummary,
     RootDiscovery,
     ScanStatus,
+    _sanitize_reason,
 )
 from obs_scan_platform.obs_client import OBSClient, encode_object_key, encode_request_body
 from obs_scan_platform.paths import prefix_temp_filename
@@ -558,12 +559,13 @@ class Scanner:
                 except Exception as exc:
                     if partial_errors is not None:
                         partial_errors.record("metadata", object_key, exc)
+                    sanitized_error = _sanitize_reason(str(exc))
                     LOGGER.warning(
                         "metadata object failure appid=%s bucket=%s object_key=%s error=%s",
                         application.appid,
                         bucket.name,
                         object_key,
-                        exc,
+                        sanitized_error,
                     )
                 finally:
                     queue.task_done()

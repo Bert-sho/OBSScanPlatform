@@ -1005,7 +1005,9 @@ class MetadataPartialFailureClient:
         self.calls.append({"url": url, "params": params, "headers": headers})
         object_key = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
         if object_key == "bad.txt":
-            raise RuntimeError("metadata unavailable")
+            raise RuntimeError(
+                "metadata unavailable for https://obs.example/private/path?token=secret-token&access_token=abc123"
+            )
         return {
             "result": {
                 "objectKey": {
@@ -1037,6 +1039,32 @@ async def test_collect_metadata_files_records_failure_and_keeps_other_files(tmp_
     assert sorted(row["object_key"] for row in rows) == ["also-good.txt", "good.txt"]
     assert partial_errors.to_manifest()["metadata_failed_files"] == 1
     assert partial_errors.to_manifest()["samples"][0]["target"] == "bad.txt"
+
+
+@pytest.mark.asyncio
+async def test_collect_metadata_files_sanitizes_failure_logs(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    scanner, application, bucket = make_scanner()
+    partial_errors = PartialErrorSummary()
+    client = MetadataPartialFailureClient()
+
+    with caplog.at_level(logging.WARNING, logger="obs_scan_platform.scanner"):
+        await scanner._collect_metadata_files(
+            application,
+            bucket,
+            "http://bucket-endpoint",
+            ["bad.txt"],
+            tmp_path,
+            client,
+            partial_errors=partial_errors,
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("metadata object failure appid=app.one bucket=bucket-name-1 object_key=bad.txt" in message for message in messages)
+    assert all("https://obs.example/private/path" not in message for message in messages)
+    assert all("secret-token" not in message for message in messages)
+    assert all("abc123" not in message for message in messages)
+    assert all("token=" not in message for message in messages)
+    assert all("access_token=" not in message for message in messages)
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,7 @@ Pending final commit from this task. Update this file with the actual hash after
 - Added a regression test that forces one metadata object to fail while the others continue.
 - Threaded an optional `PartialErrorSummary` through `_collect_metadata_files()` in `src/obs_scan_platform/scanner.py`.
 - Recorded per-object metadata failures as partial errors and logged them without aborting the rest of the metadata collection.
+- Sanitized the metadata failure warning so raw URLs and token text from exceptions do not reach logs.
 - Kept successful metadata CSV writing and concurrency limits unchanged.
 
 ## Important decisions and rationale
@@ -40,6 +41,7 @@ Pending final commit from this task. Update this file with the actual hash after
 ## Failed attempts or rejected approaches
 
 - The first targeted pytest run failed before implementation because `_collect_metadata_files()` did not accept `partial_errors`.
+- The sanitizer regression test failed before the scanner change because the warning logged the raw exception text.
 - No broader objectkeys fallback or bucket final-status logic was added here; that remains reserved for later tasks.
 
 ## Current test/build status
@@ -51,6 +53,14 @@ Focused validation passed:
 ```
 
 Result: `3 passed in 0.41s`
+
+Additional sanitizer regression passed:
+
+```powershell
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_collect_metadata_files_sanitizes_failure_logs -q
+```
+
+Result: `1 passed in 0.50s`
 
 ## Uncommitted changes, if any
 

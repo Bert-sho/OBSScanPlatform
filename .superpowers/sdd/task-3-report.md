@@ -41,6 +41,32 @@ Result:
 
 - `3 passed in 0.41s`
 
+## Sanitizer Regression
+
+Added a focused log-sanitization regression:
+
+- `tests/test_scanner.py::test_collect_metadata_files_sanitizes_failure_logs`
+
+Initial run before the scanner change failed as expected:
+
+```powershell
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_collect_metadata_files_sanitizes_failure_logs -q
+```
+
+Observed failure:
+
+- The warning logged the raw exception text, including `https://obs.example/private/path?token=secret-token&access_token=abc123`.
+
+After switching the metadata warning to the existing sanitizer, the focused regression passed:
+
+```powershell
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_collect_metadata_files_sanitizes_failure_logs -q
+```
+
+Result:
+
+- `1 passed in 0.50s`
+
 ## Changed files
 
 - `src/obs_scan_platform/scanner.py`
