@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Plan OBS interface fallback strategies and objectkeys progress reporting
+Task 1: Partial Error Model And Manifest Output
 
 ## Current branch
 
@@ -10,62 +10,55 @@ Plan OBS interface fallback strategies and objectkeys progress reporting
 
 ## Task status
 
-`wip`
+`completed`
 
 ## User goal
 
-Define endpoint-specific fallback behavior for the five OBS interfaces when requests
-time out, return HTTP errors, or return OBS business errors. The user also requested a
-new tqdm progress bar and logs for per-bucket `objectkeys` task progress.
+Add the partial error model and manifest serialization for bucket scans, without
+implementing the later filelist, metadata, or objectkeys fallback behavior.
 
 ## Completed work
 
-- Used `superpowers:brainstorming` as requested.
-- Used `superpowers:writing-plans` after the user approved the design spec.
-- Reviewed current scanner behavior, retry handling, failure propagation, manifest
-  status model, and existing `filelist` tqdm behavior.
-- Clarified and received user approval for:
-  - endpoint-specific fallback behavior;
-  - partial CSV output with bucket status `partial_failed`;
-  - strict handling for prerequisite interfaces;
-  - bounded manifest partial-error summaries;
-  - `objectkeys` progress measured by prefix count.
-- Wrote design spec:
-  - `docs/superpowers/specs/2026-07-10-obs-scan-interface-fallback-design.md`
-- Wrote implementation plan:
-  - `docs/superpowers/plans/2026-07-10-obs-scan-interface-fallbacks.md`
+- Added `PartialErrorSample` and `PartialErrorSummary` to `src/obs_scan_platform/models.py`.
+- Added `partial_errors: PartialErrorSummary | None` to `BucketScanResult`.
+- Wired manifest serialization so bucket manifests include `partial_errors` when
+  the summary has recorded failures.
+- Added the two brief-specified tests to `tests/test_scanner.py`.
+- Verified the new tests fail before the implementation, then pass after it.
 
 ## Remaining work
 
-- User must choose execution approach for the implementation plan:
-  - Subagent-Driven using `superpowers:subagent-driven-development`
-  - Inline Execution using `superpowers:executing-plans`
-- Implementation has not started.
+- None for Task 1.
+- Later fallback behavior for filelist, metadata, and objectkeys belongs to later tasks.
 
 ## Key files changed
 
-- `docs/superpowers/specs/2026-07-10-obs-scan-interface-fallback-design.md`
-- `docs/superpowers/plans/2026-07-10-obs-scan-interface-fallbacks.md`
+- `src/obs_scan_platform/models.py`
+- `src/obs_scan_platform/scanner.py`
+- `tests/test_scanner.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
+- `.superpowers/sdd/task-1-report.md`
 
 ## Validation commands run
 
-- `git diff --check`
+- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_partial_error_summary_counts_and_caps_samples tests/test_scanner.py::test_bucket_manifest_includes_partial_errors_and_keeps_error_empty -q`
+- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_partial_error_summary_counts_and_caps_samples tests/test_scanner.py::test_bucket_manifest_includes_partial_errors_and_keeps_error_empty tests/test_scanner.py::test_bucket_manifest_temp_dir_cleanup_and_retention -q`
 
 ## Validation result
 
-- Markdown/design-only validation passed.
-- No implementation code or tests were changed in this task.
+- First focused run failed as expected because `PartialErrorSummary` did not exist
+  yet.
+- Second focused run passed: `3 passed in 0.36s`.
 
 ## Known risks
 
-- The spec fixes the new manifest field name as `partial_errors`; implementation should
-  avoid adding a second warning field for the same data.
-- Full code behavior is unchanged until the implementation plan and code changes are
-  approved and executed.
+- This task deliberately stops at manifest serialization and the new partial-error
+  model. It does not change how later scan stages record failures.
+- The scanner import for `PartialErrorSummary` is present to match the brief and
+  keep the model surface explicit.
 
 ## Next recommended action
 
-Choose whether to execute `docs/superpowers/plans/2026-07-10-obs-scan-interface-fallbacks.md`
-with subagent-driven development or inline execution.
+Start the next approved fallback task and extend the partial-error plumbing into the
+scan stages that actually record filelist, metadata, and objectkeys failures.

@@ -14,7 +14,14 @@ from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Threshold
 from obs_scan_platform.csv_store import append_object_rows
 from obs_scan_platform.filelist_discovery import FilelistDiscoveryScheduler, FilelistTask
 from obs_scan_platform.logging_config import configure_logging
-from obs_scan_platform.models import BucketInfo, BucketScanResult, ObjectRow, RootDiscovery, ScanStatus
+from obs_scan_platform.models import (
+    BucketInfo,
+    BucketScanResult,
+    ObjectRow,
+    PartialErrorSummary,
+    RootDiscovery,
+    ScanStatus,
+)
 from obs_scan_platform.obs_client import OBSClient, encode_object_key, encode_request_body
 from obs_scan_platform.paths import prefix_temp_filename
 
@@ -639,6 +646,8 @@ class Scanner:
             "thresholds": result.thresholds.model_dump(mode="json"),
             "error": result.error,
         }
+        if result.partial_errors is not None and result.partial_errors.has_errors():
+            manifest["partial_errors"] = result.partial_errors.to_manifest()
         if temp_dir is None:
             return manifest
         if result.status == ScanStatus.SUCCESS and not self.config.scan.keep_temp_files:

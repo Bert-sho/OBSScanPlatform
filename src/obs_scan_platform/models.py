@@ -1,8 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from obs_scan_platform.config import Thresholds
+from obs_scan_platform.obs_client import OBSRequestError
 
 
 class ScanStatus(StrEnum):
@@ -76,6 +78,65 @@ class DirectoryStats:
 
 
 @dataclass(frozen=True)
+class PartialErrorSample:
+    endpoint: str
+    target: str
+    status: int | None
+    reason: str
+
+    def to_manifest(self) -> dict[str, Any]:
+        return {
+            "endpoint": self.endpoint,
+            "target": self.target,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+
+@dataclass
+class PartialErrorSummary:
+    sample_limit: int = 10
+    filelist_failed_dirs: int = 0
+    metadata_failed_files: int = 0
+    objectkeys_failed_prefixes: int = 0
+    samples: list[PartialErrorSample] = field(default_factory=list)
+
+    def record(self, endpoint: str, target: str, error: BaseException | str) -> None:
+        if endpoint == "filelist":
+            self.filelist_failed_dirs += 1
+        elif endpoint == "metadata":
+            self.metadata_failed_files += 1
+        elif endpoint == "objectkeys":
+            self.objectkeys_failed_prefixes += 1
+        status = error.status_code if isinstance(error, OBSRequestError) else None
+        reason = error.reason if isinstance(error, OBSRequestError) else str(error)
+        if len(self.samples) < self.sample_limit:
+            self.samples.append(
+                PartialErrorSample(
+                    endpoint=endpoint,
+                    target=target,
+                    status=status,
+                    reason=reason[:200],
+                )
+            )
+
+    def has_errors(self) -> bool:
+        return (
+            self.filelist_failed_dirs > 0
+            or self.metadata_failed_files > 0
+            or self.objectkeys_failed_prefixes > 0
+        )
+
+    def to_manifest(self) -> dict[str, Any]:
+        return {
+            "filelist_failed_dirs": self.filelist_failed_dirs,
+            "metadata_failed_files": self.metadata_failed_files,
+            "objectkeys_failed_prefixes": self.objectkeys_failed_prefixes,
+            "samples": [sample.to_manifest() for sample in self.samples],
+        }
+
+
+@dataclass(frozen=True)
 class BucketScanResult:
     appid: str
     bucket_name: str
@@ -84,3 +145,4 @@ class BucketScanResult:
     csv_path: Path | None
     thresholds: Thresholds
     error: str | None = None
+    partial_errors: PartialErrorSummary | None = None

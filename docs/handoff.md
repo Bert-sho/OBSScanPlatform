@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-10 17:54:32 +08:00
+2026-07-10 18:09:04 +08:00
 
 ## Machine/environment
 
@@ -10,7 +10,7 @@
 - Workspace: `D:\code\OBSScanPlatform`
 - Branch: `codex/obs-scan-platform`
 - Timezone: Asia/Shanghai
-- Bundled Python previously used for validation: `C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe`
+- Bundled Python used for validation: `C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe`
 
 ## Current branch
 
@@ -18,79 +18,52 @@
 
 ## Latest commit before this session
 
-`3fcd21540c3dacc4940977257eee82c5c956fa7d`
+`8cf00647bd35b47ef1becdc0f85e26c70f9289f6`
 
 ## Latest commit after this session
 
-Pending final commit. The final Codex response for this session must report the actual
-commit hash after committing these planning changes.
+Pending final commit from this task. The final Codex response for this session
+must report the actual commit hash after the work is committed.
 
 ## Summary of what changed
 
-- Brainstormed and received user approval for endpoint-specific fallback behavior for
-  the five OBS interfaces:
-  - `listbuckets`
-  - `bucket_endpoint`
-  - `filelist`
-  - `metadata`
-  - `objectkeys`
-- Confirmed the current `tqdm` progress bar shows only per-bucket `filelist` directory
-  discovery progress.
-- Added the approved design spec:
-  - `docs/superpowers/specs/2026-07-10-obs-scan-interface-fallback-design.md`
-- Added the implementation plan:
-  - `docs/superpowers/plans/2026-07-10-obs-scan-interface-fallbacks.md`
-- Updated task and handoff docs for the planning checkpoint.
+- Added `PartialErrorSample` and `PartialErrorSummary` to
+  `src/obs_scan_platform/models.py`.
+- Added `partial_errors` to `BucketScanResult`.
+- Added manifest serialization so `_bucket_result_to_manifest()` includes a
+  `partial_errors` block when the summary has recorded failures.
+- Added focused tests covering capped samples, per-endpoint counters, and bucket
+  manifest inclusion of partial errors.
 
 ## Important decisions and rationale
 
-- Use endpoint-specific fallback behavior rather than one universal failure rule.
-- Treat `listbuckets`, `bucket_endpoint`, and root `filelist` as prerequisites because
-  later scan stages cannot run safely without them.
-- Treat child `filelist`, per-object `metadata`, and per-prefix `objectkeys` failures
-  as local collection failures so the scanner can preserve partial results.
-- Buckets with local collection failures should still produce final CSV output, but
-  their status must be `partial_failed` so downstream users know the data is incomplete.
-- Use `partial_errors` as the manifest field for bounded local failure summaries.
-- `objectkeys` progress should use prefix count as the total because page count is not
-  known up front.
-- Manifest details should be bounded to avoid very large manifests on large buckets;
-  full failure details should go to logs.
+- Kept the change intentionally narrow to Task 1 only.
+- Used `OBSRequestError.status_code` and `OBSRequestError.reason` for recorded
+  request failures, with generic exceptions and strings falling back to `None` and
+  `str(error)`.
+- Only serialized `partial_errors` when the summary has actual recorded failures, so
+  empty summaries do not clutter the manifest.
 
 ## Failed attempts or rejected approaches
 
-- Rejected a universal retry-then-fail strategy because it makes one local metadata or
-  prefix failure fail an otherwise useful bucket scan.
-- Rejected fully configurable per-interface fallback at this stage because it adds
-  configuration and test matrix complexity that the current request does not require.
-- No code implementation was attempted in this brainstorming step.
-- No code implementation was attempted in this planning step.
+- The first focused pytest run failed as expected because the model type did not
+  exist yet. That failure was used as the red TDD checkpoint before implementation.
+- No broader fallback behavior was implemented here; that work is reserved for later
+  tasks in the approved plan.
 
 ## Current test/build status
 
-Design/planning validation:
+Focused validation passed:
 
 ```powershell
-git diff --check
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_partial_error_summary_counts_and_caps_samples tests/test_scanner.py::test_bucket_manifest_includes_partial_errors_and_keeps_error_empty tests/test_scanner.py::test_bucket_manifest_temp_dir_cleanup_and_retention -q
 ```
 
-Result: passed.
-
-No code tests were run because this session only writes the approved design spec,
-implementation plan, and handoff docs. Implementation code is unchanged.
-
-Known from the previous task: full `pytest -q` on this Windows machine had unrelated
-platform/test-environment failures. See earlier commits and handoff history if that
-context is needed.
+Result: `3 passed in 0.36s`
 
 ## Uncommitted changes, if any
 
-Expected before final commit:
-
-- `docs/superpowers/specs/2026-07-10-obs-scan-interface-fallback-design.md`
-- `docs/superpowers/plans/2026-07-10-obs-scan-interface-fallbacks.md`
-- `docs/current-task.md`
-- `docs/handoff.md`
+Pending commit of the Task 1 code and documentation updates.
 
 ## Exact resume instructions for the next Codex session
 
@@ -108,15 +81,17 @@ git diff --stat
 git diff
 ```
 
-3. If the planning commit has not been created, validate and commit:
+3. If Task 1 is not yet committed, stage and commit the current work:
 
 ```powershell
-git diff --check
-git add docs/superpowers/plans/2026-07-10-obs-scan-interface-fallbacks.md docs/current-task.md docs/handoff.md
-git commit -m "docs: plan obs interface fallback implementation"
+git add src/obs_scan_platform/models.py src/obs_scan_platform/scanner.py tests/test_scanner.py docs/current-task.md docs/handoff.md .superpowers/sdd/task-1-report.md
+git commit -m "feat: add partial scan error summaries"
+```
+
+4. Push the branch after commit:
+
+```powershell
 git push -u origin HEAD
 ```
 
-4. Ask the user to choose execution mode:
-   - Subagent-Driven: invoke `superpowers:subagent-driven-development`.
-   - Inline Execution: invoke `superpowers:executing-plans`.
+5. Resume the next approved fallback task only after Task 1 is recorded and pushed.

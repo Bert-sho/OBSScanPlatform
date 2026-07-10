@@ -12,7 +12,7 @@ import pytest
 
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds
 from obs_scan_platform.logging_config import configure_logging
-from obs_scan_platform.models import BucketInfo, BucketScanResult, ScanStatus
+from obs_scan_platform.models import BucketInfo, BucketScanResult, PartialErrorSummary, ScanStatus
 from obs_scan_platform.obs_client import OBSClient
 from obs_scan_platform.paths import prefix_temp_filename
 from obs_scan_platform.scanner import (
@@ -1076,3 +1076,65 @@ def test_bucket_manifest_temp_dir_cleanup_and_retention(tmp_path: Path):
     manifest = scanner._bucket_result_to_manifest(failed_result, failed_keep_dir)
     assert failed_keep_dir.exists()
     assert manifest["temp_dir"] == str(failed_keep_dir)
+
+
+def test_partial_error_summary_counts_and_caps_samples():
+    summary = PartialErrorSummary(sample_limit=2)
+
+    summary.record("filelist", "/alpha/", "first failure")
+    summary.record("metadata", "root.txt", "second failure")
+    summary.record("objectkeys", "logs/", "third failure")
+
+    assert summary.has_errors()
+    assert summary.to_manifest() == {
+        "filelist_failed_dirs": 1,
+        "metadata_failed_files": 1,
+        "objectkeys_failed_prefixes": 1,
+        "samples": [
+            {
+                "endpoint": "filelist",
+                "target": "/alpha/",
+                "status": None,
+                "reason": "first failure",
+            },
+            {
+                "endpoint": "metadata",
+                "target": "root.txt",
+                "status": None,
+                "reason": "second failure",
+            },
+        ],
+    }
+
+
+def test_bucket_manifest_includes_partial_errors_and_keeps_error_empty(tmp_path: Path):
+    scanner, _, bucket = make_scanner()
+    partial_errors = PartialErrorSummary()
+    partial_errors.record("objectkeys", "alpha/", "busy")
+    result = BucketScanResult(
+        appid="app.one",
+        bucket_name=bucket.name,
+        bucket_id=bucket.bucket_id,
+        status=ScanStatus.PARTIAL_FAILED,
+        csv_path=tmp_path / "bucket.csv",
+        thresholds=scanner.config.defaults,
+        partial_errors=partial_errors,
+    )
+
+    manifest = scanner._bucket_result_to_manifest(result, tmp_path / "missing-temp")
+
+    assert manifest["status"] == "partial_failed"
+    assert manifest["error"] is None
+    assert manifest["partial_errors"] == {
+        "filelist_failed_dirs": 0,
+        "metadata_failed_files": 0,
+        "objectkeys_failed_prefixes": 1,
+        "samples": [
+            {
+                "endpoint": "objectkeys",
+                "target": "alpha/",
+                "status": None,
+                "reason": "busy",
+            }
+        ],
+    }
