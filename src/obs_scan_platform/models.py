@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -5,6 +6,17 @@ from typing import Any
 
 from obs_scan_platform.config import Thresholds
 from obs_scan_platform.obs_client import OBSRequestError
+
+_URL_RE = re.compile(r"https?://[^\s'\"<>]+", re.IGNORECASE)
+_SECRET_QUERY_RE = re.compile(
+    r"(?i)\b((?:csb-)?token|access_token|api_key|apikey|secret|password|passwd|authorization)\s*=\s*([^&\s'\"<>]+)"
+)
+
+
+def _sanitize_reason(reason: str) -> str:
+    sanitized = _URL_RE.sub("<redacted-url>", reason)
+    sanitized = _SECRET_QUERY_RE.sub("<redacted-query>", sanitized)
+    return sanitized
 
 
 class ScanStatus(StrEnum):
@@ -116,7 +128,7 @@ class PartialErrorSummary:
                     endpoint=endpoint,
                     target=target,
                     status=status,
-                    reason=reason[:200],
+                    reason=_sanitize_reason(reason)[:200],
                 )
             )
 

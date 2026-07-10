@@ -13,7 +13,7 @@ import pytest
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds
 from obs_scan_platform.logging_config import configure_logging
 from obs_scan_platform.models import BucketInfo, BucketScanResult, PartialErrorSummary, ScanStatus
-from obs_scan_platform.obs_client import OBSClient
+from obs_scan_platform.obs_client import OBSClient, OBSRequestError
 from obs_scan_platform.paths import prefix_temp_filename
 from obs_scan_platform.scanner import (
     Scanner,
@@ -1105,6 +1105,34 @@ def test_partial_error_summary_counts_and_caps_samples():
             },
         ],
     }
+
+
+def test_partial_error_summary_redacts_urls_and_credential_query_text():
+    summary = PartialErrorSummary(sample_limit=2)
+
+    summary.record(
+        "metadata",
+        "root.txt",
+        OBSRequestError(
+            endpoint="metadata",
+            status_code=503,
+            reason="upstream failed for https://obs.example/path?token=secret-token&user=alice",
+        ),
+    )
+    summary.record(
+        "objectkeys",
+        "logs/",
+        "download failed for http://obs.example/archive?access_token=abc123&bucket=demo",
+    )
+
+    samples = summary.to_manifest()["samples"]
+    assert len(samples) == 2
+    assert all("http://obs.example" not in sample["reason"] for sample in samples)
+    assert all("https://obs.example" not in sample["reason"] for sample in samples)
+    assert all("secret-token" not in sample["reason"] for sample in samples)
+    assert all("abc123" not in sample["reason"] for sample in samples)
+    assert all("token=" not in sample["reason"] for sample in samples)
+    assert all("access_token=" not in sample["reason"] for sample in samples)
 
 
 def test_bucket_manifest_includes_partial_errors_and_keeps_error_empty(tmp_path: Path):

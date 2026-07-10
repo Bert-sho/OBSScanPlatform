@@ -14,17 +14,18 @@ Task 1: Partial Error Model And Manifest Output
 
 ## User goal
 
-Add the partial error model and manifest serialization for bucket scans, without
-implementing the later filelist, metadata, or objectkeys fallback behavior.
+Fix Task 1 review feedback by sanitizing partial error sample reasons before they
+reach the manifest, without implementing the later filelist, metadata, or
+objectkeys fallback behavior.
 
 ## Completed work
 
-- Added `PartialErrorSample` and `PartialErrorSummary` to `src/obs_scan_platform/models.py`.
-- Added `partial_errors: PartialErrorSummary | None` to `BucketScanResult`.
-- Wired manifest serialization so bucket manifests include `partial_errors` when
-  the summary has recorded failures.
-- Added the two brief-specified tests to `tests/test_scanner.py`.
-- Verified the new tests fail before the implementation, then pass after it.
+- Added sanitization in `PartialErrorSummary.record()` so URLs and credential-style
+  query text are removed before sample reasons are written to the manifest.
+- Added a focused regression test that proves the sanitizer fails before the fix
+  and passes after it.
+- Removed the now-unused `PartialErrorSummary` import from `src/obs_scan_platform/scanner.py`.
+- Kept the Task 1 partial-error model and manifest output otherwise unchanged.
 
 ## Remaining work
 
@@ -42,21 +43,22 @@ implementing the later filelist, metadata, or objectkeys fallback behavior.
 
 ## Validation commands run
 
-- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_partial_error_summary_counts_and_caps_samples tests/test_scanner.py::test_bucket_manifest_includes_partial_errors_and_keeps_error_empty -q`
-- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_partial_error_summary_counts_and_caps_samples tests/test_scanner.py::test_bucket_manifest_includes_partial_errors_and_keeps_error_empty tests/test_scanner.py::test_bucket_manifest_temp_dir_cleanup_and_retention -q`
+- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_partial_error_summary_counts_and_caps_samples tests/test_scanner.py::test_partial_error_summary_redacts_urls_and_credential_query_text tests/test_scanner.py::test_bucket_manifest_includes_partial_errors_and_keeps_error_empty -q`
+- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_partial_error_summary_counts_and_caps_samples tests/test_scanner.py::test_partial_error_summary_redacts_urls_and_credential_query_text tests/test_scanner.py::test_bucket_manifest_includes_partial_errors_and_keeps_error_empty tests/test_scanner.py::test_bucket_manifest_temp_dir_cleanup_and_retention -q`
 
 ## Validation result
 
-- First focused run failed as expected because `PartialErrorSummary` did not exist
-  yet.
-- Second focused run passed: `3 passed in 0.36s`.
+- The sanitizer regression test failed as expected before the fix, confirming the
+  raw URL/token text was leaking into the sample reason.
+- The final focused run passed: `4 passed in 0.42s`.
 
 ## Known risks
 
 - This task deliberately stops at manifest serialization and the new partial-error
   model. It does not change how later scan stages record failures.
-- The scanner import for `PartialErrorSummary` is present to match the brief and
-  keep the model surface explicit.
+- Sanitization is currently focused on URLs and credential-style query pairs in
+  partial-error sample reasons; later tasks may need broader redaction rules if new
+  failure sources surface.
 
 ## Next recommended action
 

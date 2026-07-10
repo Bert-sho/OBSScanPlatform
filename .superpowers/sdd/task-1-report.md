@@ -62,3 +62,50 @@ Observed result:
   metadata, or objectkeys scan paths.
 - The scanner import for `PartialErrorSummary` is intentionally present to match the
   brief, even though Task 1 does not yet use the type in scan execution flow.
+
+## Review fix addendum
+
+### Summary
+
+Sanitized `PartialErrorSummary.record()` so `partial_errors.samples[].reason` no
+longer preserves raw request URLs or credential-style query text.
+
+### RED checkpoint
+
+Focused regression command:
+
+```powershell
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_partial_error_summary_counts_and_caps_samples tests/test_scanner.py::test_partial_error_summary_redacts_urls_and_credential_query_text tests/test_scanner.py::test_bucket_manifest_includes_partial_errors_and_keeps_error_empty -q
+```
+
+Observed result:
+
+- `test_partial_error_summary_redacts_urls_and_credential_query_text` failed because
+  the sample reason still contained `http://obs.example` / `https://obs.example`
+  text before sanitization.
+
+### GREEN checkpoint
+
+Focused validation after the sanitizer fix:
+
+```powershell
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py::test_partial_error_summary_counts_and_caps_samples tests/test_scanner.py::test_partial_error_summary_redacts_urls_and_credential_query_text tests/test_scanner.py::test_bucket_manifest_includes_partial_errors_and_keeps_error_empty tests/test_scanner.py::test_bucket_manifest_temp_dir_cleanup_and_retention -q
+```
+
+Observed result:
+
+- `4 passed in 0.42s`
+
+### Changed files
+
+- `src/obs_scan_platform/models.py`
+- `src/obs_scan_platform/scanner.py`
+- `tests/test_scanner.py`
+- `docs/current-task.md`
+- `docs/handoff.md`
+- `.superpowers/sdd/task-1-report.md`
+
+### Concerns
+
+- Sanitization currently targets URLs and common credential query keys. If later
+  tasks record different secret shapes, the redaction rules may need to grow.

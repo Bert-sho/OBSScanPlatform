@@ -18,7 +18,6 @@ from obs_scan_platform.models import (
     BucketInfo,
     BucketScanResult,
     ObjectRow,
-    PartialErrorSummary,
     RootDiscovery,
     ScanStatus,
 )
