@@ -355,12 +355,67 @@ async def test_discover_root_logs_filelist_progress(caplog: pytest.LogCaptureFix
 
 
 @pytest.mark.asyncio
+async def test_discover_root_progress_total_excludes_discarded_next_level(caplog: pytest.LogCaptureFixture):
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    scanner.config.scan.filelist_task_limit_per_bucket = 1
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "alpha/"}],
+                    "nextOffset": "",
+                }
+            },
+        ]
+    )
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        await scanner._discover_root(application, bucket, client)
+
+    progress_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "filelist progress appid=app.one bucket=bucket-name-1" in record.getMessage()
+    ]
+    assert progress_messages == [
+        "filelist progress appid=app.one bucket=bucket-name-1 completed=1 total=1",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_discover_root_updates_progress_bar_when_enabled(monkeypatch: pytest.MonkeyPatch):
     scanner, application, bucket = make_scanner()
     scanner.show_progress = True
     progress_bar = DummyProgressBar()
     monkeypatch.setattr(scanner, "_filelist_progress_bar", lambda app, bucket_info, total: progress_bar)
     client = FakeClient([{"result": {"files": [], "nextOffset": ""}}])
+
+    await scanner._discover_root(application, bucket, client)
+
+    assert progress_bar.total == 1
+    assert progress_bar.updates == [1]
+    assert progress_bar.closed is True
+
+
+@pytest.mark.asyncio
+async def test_discover_root_progress_bar_total_excludes_discarded_next_level(monkeypatch: pytest.MonkeyPatch):
+    scanner, application, bucket = make_scanner()
+    scanner.show_progress = True
+    scanner.config.defaults.filelist_depth = 2
+    scanner.config.scan.filelist_task_limit_per_bucket = 1
+    progress_bar = DummyProgressBar()
+    monkeypatch.setattr(scanner, "_filelist_progress_bar", lambda app, bucket_info, total: progress_bar)
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "alpha/"}],
+                    "nextOffset": "",
+                }
+            },
+        ]
+    )
 
     await scanner._discover_root(application, bucket, client)
 

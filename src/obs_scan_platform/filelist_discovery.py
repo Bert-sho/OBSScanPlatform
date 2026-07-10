@@ -32,7 +32,9 @@ class FilelistDiscoveryScheduler:
 
     @property
     def pending_total_tasks(self) -> int:
-        return self._total_tasks + len(self._next_level)
+        if self._next_level and self._total_tasks < self.task_limit:
+            return self._total_tasks + len(self._next_level)
+        return self._total_tasks
 
     def current_level(self) -> list[FilelistTask]:
         tasks = [task for task in self._current_level if task.path not in self._scanned_paths]
