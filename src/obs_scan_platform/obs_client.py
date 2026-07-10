@@ -34,15 +34,39 @@ def _response_reason(response: httpx.Response) -> str:
 
 
 def _json_failure_reason(data: dict[str, Any]) -> str:
-    return str(data.get("msg") or data.get("message") or data.get("error") or "OBS returned success=false")[:200]
+    payload = _payload_from_data(data)
+    payload_reason = payload.get("msg") or payload.get("message") or payload.get("error")
+    return str(data.get("msg") or data.get("message") or data.get("error") or payload_reason or "OBS returned success=false")[
+        :200
+    ]
+
+
+def _payload_from_data(data: dict[str, Any]) -> Any:
+    payload = data.get("result")
+    return payload if isinstance(payload, dict) else data
+
+
+def _has_failure_reason(data: dict[str, Any]) -> bool:
+    payload = _payload_from_data(data)
+    payload_reason = payload.get("msg") or payload.get("message") or payload.get("error")
+    return bool(data.get("msg") or data.get("message") or data.get("error") or payload_reason)
 
 
 def _has_empty_filelist_objects(data: dict[str, Any]) -> bool:
-    payload = data.get("result")
-    if not isinstance(payload, dict):
-        payload = data
+    payload = _payload_from_data(data)
     objects = payload.get("objects")
     return isinstance(objects, dict) and not objects
+
+
+def _has_empty_objectkeys(data: dict[str, Any]) -> bool:
+    payload = _payload_from_data(data)
+    for key in ("objectkeys", "objectKeys", "list"):
+        value = payload.get(key)
+        if isinstance(value, list) and not value:
+            return True
+        if isinstance(value, dict) and not value:
+            return True
+    return False
 
 
 def encode_request_body(payload: dict[str, Any]) -> str:
@@ -93,7 +117,9 @@ class OBSClient:
                 data = response.json()
                 success = data.get("success")
                 if success in (False, "false"):
-                    if endpoint == "filelist" and _has_empty_filelist_objects(data):
+                    if not _has_failure_reason(data) and endpoint == "filelist" and _has_empty_filelist_objects(data):
+                        return data
+                    if not _has_failure_reason(data) and endpoint == "objectkeys" and _has_empty_objectkeys(data):
                         return data
                     raise OBSRequestError(
                         endpoint=endpoint,

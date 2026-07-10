@@ -330,3 +330,68 @@ async def test_get_json_returns_empty_filelist_objects_even_when_success_false()
 
     assert data == {"success": False, "msg": "", "objects": {}}
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_get_json_returns_empty_objectkeys_even_when_success_false():
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "success": False,
+                "objectKeys": [],
+                "truncated": "false",
+            },
+        )
+
+    client = OBSClient(
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
+        request_semaphore=asyncio.Semaphore(1),
+        max_retries=3,
+        retry_base_delay_seconds=0,
+        retry_max_delay_seconds=0,
+    )
+
+    try:
+        data = await client.get_json("http://obs.example/test", params={}, endpoint="objectkeys")
+    finally:
+        await client.close()
+
+    assert data == {"success": False, "objectKeys": [], "truncated": "false"}
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_get_json_empty_objectkeys_still_raises_when_result_has_error_reason():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "success": False,
+                "result": {
+                    "objectKeys": [],
+                    "truncated": "false",
+                    "message": "permission denied",
+                },
+            },
+        )
+
+    client = OBSClient(
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
+        request_semaphore=asyncio.Semaphore(1),
+        max_retries=0,
+        retry_base_delay_seconds=0,
+        retry_max_delay_seconds=0,
+    )
+
+    try:
+        with pytest.raises(OBSRequestError) as exc_info:
+            await client.get_json("http://obs.example/test", params={}, endpoint="objectkeys")
+    finally:
+        await client.close()
+
+    assert str(exc_info.value) == "OBS request failed endpoint=objectkeys status=200 reason=permission denied"

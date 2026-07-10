@@ -188,7 +188,30 @@ class Scanner:
 
                 async def scan_bucket_with_limit(bucket: BucketInfo) -> BucketScanResult:
                     async with bucket_semaphore:
-                        return await self._scan_bucket(application, bucket, client, run_id, results_dir, scan_started_ms)
+                        try:
+                            return await self._scan_bucket(
+                                application,
+                                bucket,
+                                client,
+                                run_id,
+                                results_dir,
+                                scan_started_ms,
+                            )
+                        except Exception as exc:
+                            LOGGER.exception(
+                                "bucket failure appid=%s bucket=%s error=unexpected_exception",
+                                application.appid,
+                                bucket.name,
+                            )
+                            return BucketScanResult(
+                                appid=application.appid,
+                                bucket_name=bucket.name,
+                                bucket_id=bucket.bucket_id,
+                                status=ScanStatus.FAILED,
+                                csv_path=None,
+                                thresholds=self.config.thresholds_for(application, bucket.name),
+                                error=str(exc),
+                            )
 
                 bucket_results = await asyncio.gather(*(scan_bucket_with_limit(bucket) for bucket in buckets))
             except Exception as exc:

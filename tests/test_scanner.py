@@ -7,11 +7,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds
 from obs_scan_platform.logging_config import configure_logging
 from obs_scan_platform.models import BucketInfo, BucketScanResult, ScanStatus
+from obs_scan_platform.obs_client import OBSClient
 from obs_scan_platform.paths import prefix_temp_filename
 from obs_scan_platform.scanner import (
     Scanner,
@@ -751,6 +753,22 @@ def test_configure_logging_suppresses_httpx_request_url_logs(tmp_path: Path):
     assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.WARNING
 
 
+def test_configure_logging_filters_httpx_request_urls_even_after_level_reset(tmp_path: Path):
+    log_path = tmp_path / "scan.log"
+    configure_logging(log_path)
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.setLevel(logging.INFO)
+
+    httpx_logger.info('HTTP Request: GET http://obs.example/secret?token=secret-token "HTTP/1.1 200 OK"')
+    logging.getLogger("obs_scan_platform.scanner").info("bucket finish appid=app.one bucket=bucket-a")
+
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "bucket finish appid=app.one bucket=bucket-a" in log_text
+    assert "HTTP Request" not in log_text
+    assert "obs.example" not in log_text
+    assert "secret-token" not in log_text
+
+
 @pytest.mark.asyncio
 async def test_discover_root_progress_logs_do_not_include_request_urls(caplog: pytest.LogCaptureFixture):
     scanner, application, bucket = make_scanner()
@@ -764,6 +782,110 @@ async def test_discover_root_progress_logs_do_not_include_request_urls(caplog: p
     assert all("http://global-obs.example" not in message for message in messages)
     assert all("requestbody" not in message for message in messages)
     assert all(application.apptoken not in message for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_scan_shared_bucket_treats_empty_objectkeys_success_false_as_empty(
+    tmp_path: Path,
+):
+    scanner, application, _ = make_scanner()
+    application.scan_shared_buckets = True
+    scanner.config.defaults.filelist_depth = 1
+    bucket = BucketInfo("shared-id", "shared-bucket", "HEC", "cn-east-3", "reader", "other-app")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/rest/s3/bucket/endpoint"):
+            return httpx.Response(200, json={"success": True, "result": "http://bucket-endpoint/"})
+        if request.url.path.endswith("/rest/s3/bucket/filelist"):
+            request_body = decode_request_body({"params": dict(request.url.params)})
+            assert request_body["id"] == "shared-id"
+            assert request_body["path"] == "/"
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "result": {
+                        "files": [{"objectType": "folder", "objectKey": "shared-prefix/"}],
+                        "nextOffset": "",
+                    },
+                },
+            )
+        if request.url.path.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
+            assert request.url.params["bucketid"] == "shared-bucket"
+            assert request.url.params["bucketld"] == "shared-id"
+            return httpx.Response(
+                200,
+                json={
+                    "success": False,
+                    "objectKeys": [],
+                    "truncated": "false",
+                },
+            )
+        raise AssertionError(f"unexpected URL: {request.url}")
+
+    client = OBSClient(
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        request_semaphore=asyncio.Semaphore(10),
+        max_retries=0,
+        retry_base_delay_seconds=0,
+        retry_max_delay_seconds=0,
+    )
+    try:
+        result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+    finally:
+        await client.close()
+
+    assert result.status == ScanStatus.SUCCESS
+    assert result.csv_path == tmp_path / application.appid / "shared-bucket.csv"
+    with result.csv_path.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.reader(file))
+    assert rows[0][0:3] == ["run_id", "appid", "bucket_name"]
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, application, _ = make_scanner()
+    bad_bucket = BucketInfo("bad-id", "bad-bucket", "HEC", "cn-east-3", "owner", None)
+    good_bucket = BucketInfo("good-id", "good-bucket", "HEC", "cn-east-3", "owner", None)
+
+    async def fake_list_buckets(app: ApplicationConfig, client: Any) -> list[BucketInfo]:
+        del app, client
+        return [bad_bucket, good_bucket]
+
+    async def fake_scan_bucket(
+        app: ApplicationConfig,
+        bucket: BucketInfo,
+        client: Any,
+        run_id: str,
+        results_dir: Path,
+        scan_started_ms: int,
+    ) -> BucketScanResult:
+        del app, client, run_id, results_dir, scan_started_ms
+        if bucket.name == "bad-bucket":
+            raise RuntimeError("unexpected bucket boom")
+        return BucketScanResult(
+            appid=application.appid,
+            bucket_name=bucket.name,
+            bucket_id=bucket.bucket_id,
+            status=ScanStatus.SUCCESS,
+            csv_path=tmp_path / application.appid / f"{bucket.name}.csv",
+            thresholds=scanner.config.defaults,
+        )
+
+    monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+    monkeypatch.setattr(scanner, "_scan_bucket", fake_scan_bucket)
+
+    result = await scanner._scan_application(application, "run-1", tmp_path, scan_started_ms=1000)
+
+    assert result["status"] == ScanStatus.PARTIAL_FAILED.value
+    assert [bucket["bucket_name"] for bucket in result["buckets"]] == ["bad-bucket", "good-bucket"]
+    assert result["buckets"][0]["status"] == ScanStatus.FAILED.value
+    assert result["buckets"][0]["error"] == "unexpected bucket boom"
+    assert result["buckets"][1]["status"] == ScanStatus.SUCCESS.value
 
 
 @pytest.mark.asyncio
