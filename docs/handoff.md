@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-10 17:50:14 +08:00
+2026-07-10 17:54:32 +08:00
 
 ## Machine/environment
 
@@ -18,12 +18,12 @@
 
 ## Latest commit before this session
 
-`9f999746d0e2b21fb657d1294e2415831e49705a`
+`3fcd21540c3dacc4940977257eee82c5c956fa7d`
 
 ## Latest commit after this session
 
 Pending final commit. The final Codex response for this session must report the actual
-commit hash after committing these design changes.
+commit hash after committing these planning changes.
 
 ## Summary of what changed
 
@@ -38,7 +38,9 @@ commit hash after committing these design changes.
   discovery progress.
 - Added the approved design spec:
   - `docs/superpowers/specs/2026-07-10-obs-scan-interface-fallback-design.md`
-- Updated task and handoff docs for the design-only checkpoint.
+- Added the implementation plan:
+  - `docs/superpowers/plans/2026-07-10-obs-scan-interface-fallbacks.md`
+- Updated task and handoff docs for the planning checkpoint.
 
 ## Important decisions and rationale
 
@@ -62,10 +64,11 @@ commit hash after committing these design changes.
 - Rejected fully configurable per-interface fallback at this stage because it adds
   configuration and test matrix complexity that the current request does not require.
 - No code implementation was attempted in this brainstorming step.
+- No code implementation was attempted in this planning step.
 
 ## Current test/build status
 
-Design-only validation:
+Design/planning validation:
 
 ```powershell
 git diff --check
@@ -73,8 +76,8 @@ git diff --check
 
 Result: passed.
 
-No code tests were run because this session only writes the approved design spec and
-does not change implementation code.
+No code tests were run because this session only writes the approved design spec,
+implementation plan, and handoff docs. Implementation code is unchanged.
 
 Known from the previous task: full `pytest -q` on this Windows machine had unrelated
 platform/test-environment failures. See earlier commits and handoff history if that
@@ -85,6 +88,7 @@ context is needed.
 Expected before final commit:
 
 - `docs/superpowers/specs/2026-07-10-obs-scan-interface-fallback-design.md`
+- `docs/superpowers/plans/2026-07-10-obs-scan-interface-fallbacks.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
@@ -104,14 +108,15 @@ git diff --stat
 git diff
 ```
 
-3. If the design commit has not been created, validate and commit:
+3. If the planning commit has not been created, validate and commit:
 
 ```powershell
 git diff --check
-git add docs/superpowers/specs/2026-07-10-obs-scan-interface-fallback-design.md docs/current-task.md docs/handoff.md
-git commit -m "docs: design obs interface fallback strategies"
+git add docs/superpowers/plans/2026-07-10-obs-scan-interface-fallbacks.md docs/current-task.md docs/handoff.md
+git commit -m "docs: plan obs interface fallback implementation"
 git push -u origin HEAD
 ```
 
-4. Wait for the user to review the spec. If approved, invoke
-   `superpowers:writing-plans` and create the implementation plan before editing code.
+4. Ask the user to choose execution mode:
+   - Subagent-Driven: invoke `superpowers:subagent-driven-development`.
+   - Inline Execution: invoke `superpowers:executing-plans`.
