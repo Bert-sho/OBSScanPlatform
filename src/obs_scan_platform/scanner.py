@@ -525,6 +525,7 @@ class Scanner:
         object_keys: list[str],
         temp_dir: Path,
         client: OBSClient,
+        partial_errors: PartialErrorSummary | None = None,
     ) -> None:
         rows: list[ObjectRow] = []
         queue: asyncio.Queue[str] = asyncio.Queue()
@@ -554,6 +555,16 @@ class Scanner:
                     row = self._metadata_to_object_row(object_key, data)
                     if row is not None:
                         rows.append(row)
+                except Exception as exc:
+                    if partial_errors is not None:
+                        partial_errors.record("metadata", object_key, exc)
+                    LOGGER.warning(
+                        "metadata object failure appid=%s bucket=%s object_key=%s error=%s",
+                        application.appid,
+                        bucket.name,
+                        object_key,
+                        exc,
+                    )
                 finally:
                     queue.task_done()
 

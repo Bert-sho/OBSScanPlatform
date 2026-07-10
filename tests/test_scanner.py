@@ -997,6 +997,48 @@ async def test_collect_metadata_files_processes_all_files_with_bounded_workers(t
     assert client.max_active <= 2
 
 
+class MetadataPartialFailureClient:
+    def __init__(self):
+        self.calls: list[dict[str, Any]] = []
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        self.calls.append({"url": url, "params": params, "headers": headers})
+        object_key = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
+        if object_key == "bad.txt":
+            raise RuntimeError("metadata unavailable")
+        return {
+            "result": {
+                "objectKey": {
+                    "objectKey": object_key,
+                    "size": "12",
+                    "lastModifyTime": "1000",
+                }
+            }
+        }
+
+
+@pytest.mark.asyncio
+async def test_collect_metadata_files_records_failure_and_keeps_other_files(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    partial_errors = PartialErrorSummary()
+    client = MetadataPartialFailureClient()
+
+    await scanner._collect_metadata_files(
+        application,
+        bucket,
+        "http://bucket-endpoint",
+        ["good.txt", "bad.txt", "also-good.txt"],
+        tmp_path,
+        client,
+        partial_errors=partial_errors,
+    )
+
+    rows = list(csv.DictReader((tmp_path / "metadata_files.csv").open(newline="", encoding="utf-8")))
+    assert sorted(row["object_key"] for row in rows) == ["also-good.txt", "good.txt"]
+    assert partial_errors.to_manifest()["metadata_failed_files"] == 1
+    assert partial_errors.to_manifest()["samples"][0]["target"] == "bad.txt"
+
+
 @pytest.mark.asyncio
 async def test_collect_prefix_stops_when_truncated_string_false(tmp_path: Path):
     scanner, application, bucket = make_scanner()
