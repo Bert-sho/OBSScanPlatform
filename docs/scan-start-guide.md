@@ -34,6 +34,8 @@ applications:
     scan_shared_buckets: false
 ```
 
+当 `scan_shared_buckets: true` 时，扫描器会纳入字段完整且可尝试扫描的共享桶，要求桶记录具备 bucket id、name、vendor、region。
+
 目录发现使用递归 `filelist` 拆分。默认 `filelist_depth` 为 `5`，每个桶的 filelist 目录任务数由 `scan.filelist_task_limit_per_bucket` 控制，默认约 `100` 个任务。桶可以只覆盖自己的 filelist 深度，不需要重复配置三个阈值：
 
 ```yaml
@@ -52,6 +54,8 @@ applications:
         filelist_depth: 8
 ```
 
+`scan.filelist_task_limit_per_bucket` 是是否继续递归到更深层级的目标阈值，不会截断当前层级已经发现并纳入队列的目录任务。
+
 推荐并发默认值：
 
 ```yaml
@@ -61,6 +65,8 @@ scan:
 ```
 
 `objectkeys_concurrency_per_bucket` 只限制单个桶内 objectkeys 前缀 worker 的并发；`filelist` 和 metadata 请求仍受全局请求并发限制。旧配置项 `per_bucket_prefix_concurrency` 仍兼容，但新配置建议使用 `objectkeys_concurrency_per_bucket`。
+
+每个桶会先完成全部 `filelist` 发现和 metadata 获取，再开始 `objectkeys` 获取。
 
 扫描结果默认写入：
 
@@ -91,6 +97,8 @@ scan finished: success run_id=20260709T010203Z
 如果扫描状态不是 `success`，命令会以非 0 退出码结束。
 
 命令行扫描会为每个桶的 `filelist` 目录发现显示 `tqdm` 进度条。进度条只展示目录任务进度，不会打印每个 OBS 请求。
+
+命令行输出和 `results/<run_id>/scan.log` 默认不会打印完整 OBS 请求链接、query、requestbody 或 token。请求失败仍会记录安全诊断信息，例如 `endpoint=objectkeys status=503 reason=busy`。
 
 ### 只扫描一个应用
 

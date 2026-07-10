@@ -34,6 +34,8 @@ applications:
     scan_shared_buckets: false
 ```
 
+When `scan_shared_buckets: true` is set, scan-capable shared buckets with complete bucket id, name, vendor, and region fields are included.
+
 Directory discovery uses bounded recursive `filelist` splitting. The default depth is `5`, and each bucket is capped at about `100` filelist directory tasks by `scan.filelist_task_limit_per_bucket`. A bucket can override only its filelist depth without repeating the size and inactivity thresholds:
 
 ```yaml
@@ -51,6 +53,20 @@ applications:
       bucket-1191:
         filelist_depth: 8
 ```
+
+`scan.filelist_task_limit_per_bucket` is a threshold for deciding whether to recurse into a deeper level. It does not truncate directory tasks already discovered for the current level.
+
+Recommended request concurrency defaults:
+
+```yaml
+scan:
+  global_request_concurrency: 150
+  objectkeys_concurrency_per_bucket: 30
+```
+
+`objectkeys_concurrency_per_bucket` limits only per-bucket `objectkeys` prefix workers. `filelist` and metadata requests still share the global request limit. The legacy `scan.per_bucket_prefix_concurrency` setting remains compatible, but new configs should use `scan.objectkeys_concurrency_per_bucket`.
+
+For each bucket, scanning completes all `filelist` discovery and metadata requests before starting `objectkeys` collection.
 
 ## CLI Scans
 
@@ -114,6 +130,8 @@ Each run also writes:
 - `results/<run_id>/scan.log`
 
 `scan.log` includes per-bucket filelist progress lines such as `filelist progress ... completed=<completed> total=<total>` and bucket duration fields such as `elapsed_seconds=...`.
+
+Default terminal output and `scan.log` do not print full OBS request URLs, query strings, encoded request bodies, or tokens. Failed OBS requests still include safe diagnostics such as `endpoint=objectkeys status=503 reason=busy`.
 
 Empty buckets and buckets containing only empty folders still finish successfully. They produce a bucket CSV with only the final header row.
 
