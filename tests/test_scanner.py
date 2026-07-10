@@ -1209,6 +1209,65 @@ async def test_scan_bucket_finishes_filelist_and_metadata_before_objectkeys(tmp_
     assert client.phase_events == ["bucket_endpoint", "filelist", "filelist", "metadata", "objectkeys"]
 
 
+class PartialBucketScanClient:
+    def __init__(self):
+        self.calls: list[dict[str, Any]] = []
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        self.calls.append({"url": url, "params": params, "headers": headers, "endpoint": endpoint})
+        if endpoint == "bucket_endpoint":
+            return {"result": "http://bucket-endpoint/"}
+        if endpoint == "filelist":
+            request_body = decode_request_body({"params": params})
+            if request_body["path"] == "/":
+                return {
+                    "result": {
+                        "files": [
+                            {"objectType": "folder", "objectKey": "good/"},
+                            {"objectType": "folder", "objectKey": "bad/"},
+                            {"objectType": "object", "objectKey": "root.txt"},
+                        ],
+                        "nextOffset": "",
+                    }
+                }
+            return {"result": {"files": [], "nextOffset": ""}}
+        if endpoint == "metadata":
+            return {"result": {"objectKey": {"objectKey": "root.txt", "size": "12", "lastModifyTime": "1000"}}}
+        if endpoint == "objectkeys":
+            prefix = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
+            if prefix == "bad/":
+                raise RuntimeError("prefix boom")
+            return {
+                "result": {
+                    "objectkeys": [{"objectKey": "good/file.txt", "size": "5", "lastModifyTime": "2000"}],
+                    "truncated": "false",
+                }
+            }
+        raise AssertionError(endpoint)
+
+
+@pytest.mark.asyncio
+async def test_scan_bucket_returns_partial_failed_with_csv_for_objectkeys_failure(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    scanner.config.scan.objectkeys_concurrency_per_bucket = 1
+
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        PartialBucketScanClient(),
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+    )
+
+    assert result.status == ScanStatus.PARTIAL_FAILED
+    assert result.error is None
+    assert result.csv_path == tmp_path / application.appid / f"{bucket.name}.csv"
+    assert result.csv_path.exists()
+    assert result.partial_errors is not None
+    assert result.partial_errors.to_manifest()["objectkeys_failed_prefixes"] == 1
+
+
 @pytest.mark.asyncio
 async def test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elapsed(
     tmp_path: Path,

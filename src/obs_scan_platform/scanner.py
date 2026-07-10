@@ -301,8 +301,24 @@ class Scanner:
                 thresholds,
                 partial_errors=partial_errors,
             )
-            await self._collect_metadata_files(application, bucket, endpoint, discovery.metadata_files, temp_dir, client)
-            await self._collect_prefixes(application, bucket, endpoint, discovery.prefixes, temp_dir, client)
+            await self._collect_metadata_files(
+                application,
+                bucket,
+                endpoint,
+                discovery.metadata_files,
+                temp_dir,
+                client,
+                partial_errors,
+            )
+            await self._collect_prefixes(
+                application,
+                bucket,
+                endpoint,
+                discovery.prefixes,
+                temp_dir,
+                client,
+                partial_errors,
+            )
             aggregate_bucket(
                 run_id=run_id,
                 appid=application.appid,
@@ -333,18 +349,19 @@ class Scanner:
             )
 
         elapsed_seconds = time.monotonic() - bucket_started
+        status = ScanStatus.PARTIAL_FAILED if partial_errors.has_errors() else ScanStatus.SUCCESS
         LOGGER.info(
             "bucket finish appid=%s bucket=%s status=%s elapsed_seconds=%.3f",
             application.appid,
             bucket.name,
-            ScanStatus.SUCCESS.value,
+            status.value,
             elapsed_seconds,
         )
         return BucketScanResult(
             appid=application.appid,
             bucket_name=bucket.name,
             bucket_id=bucket.bucket_id,
-            status=ScanStatus.SUCCESS,
+            status=status,
             csv_path=output_path,
             thresholds=thresholds,
             partial_errors=partial_errors if partial_errors.has_errors() else None,

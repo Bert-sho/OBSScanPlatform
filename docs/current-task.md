@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Task 4: Objectkeys Per-Prefix Fallback And Progress
+Task 5: Bucket-Level Integration And End-To-End Partial Result
 
 ## Current branch
 
@@ -14,44 +14,43 @@ Task 4: Objectkeys Per-Prefix Fallback And Progress
 
 ## User goal
 
-Add per-prefix objectkeys fallback so a single prefix failure is recorded as partial, the remaining prefixes still write their CSV fragments, and `_collect_prefixes()` reports sanitized progress/failure logs plus an optional objectkeys progress bar.
+Wire `_scan_bucket()` so local collection failures recorded via `PartialErrorSummary` produce `ScanStatus.PARTIAL_FAILED` with a retained bucket CSV and `partial_errors` in the bucket/application/run manifests, while keeping endpoint/root discovery/aggregation failures as hard failures with `error`.
 
 ## Completed work
 
-- Added the two Task 4 regression tests from the brief for prefix fallback/logging and objectkeys progress updates.
-- Added `_objectkeys_progress_bar()` alongside the existing filelist progress helper.
-- Extended `_collect_prefixes()` with an optional `partial_errors` parameter, per-prefix exception handling, sanitized failure logging, and progress/start/finish logs.
-- Ensured objectkeys progress advances for both successful and failed prefixes and closes the progress bar from a `finally` path.
-- Kept the change scoped to objectkeys helper behavior only; no bucket-level status or manifest integration was added.
+- Added the Task 5 bucket-level regression test covering an objectkeys prefix failure that still aggregates a bucket CSV.
+- Added the Task 5 end-to-end manifest regression test covering a partially failed bucket that keeps its CSV and partial error summary.
+- Updated `_scan_bucket()` to pass the existing `PartialErrorSummary` accumulator into `_collect_metadata_files()` and `_collect_prefixes()`.
+- Updated `_scan_bucket()` to emit `partial_failed` instead of `success` when aggregation succeeds but any local collection errors were recorded.
+- Kept hard-failure behavior unchanged for endpoint lookup, root discovery, and aggregation exceptions.
 
 ## Remaining work
 
-- None for Task 4.
-- Task 5 still needs to wire bucket-level final status and end-to-end manifest behavior.
+- None for Task 5.
 
 ## Key files changed
 
 - `src/obs_scan_platform/scanner.py`
 - `tests/test_scanner.py`
+- `tests/test_scan_end_to_end.py`
 - `docs/current-task.md`
 - `docs/handoff.md`
-- `.superpowers/sdd/task-4-report.md`
+- `.superpowers/sdd/task-5-report.md`
 
 ## Validation commands run
 
-- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_collect_prefixes_records_prefix_failure_and_keeps_other_prefixes tests/test_scanner.py::test_collect_prefixes_updates_objectkeys_progress_for_success_and_failure -q`
-- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_collect_prefixes_records_prefix_failure_and_keeps_other_prefixes tests/test_scanner.py::test_collect_prefixes_updates_objectkeys_progress_for_success_and_failure tests/test_scanner.py::test_collect_prefixes_processes_all_prefixes_with_bounded_workers tests/test_scanner.py::test_collect_prefix_stops_when_truncated_string_false -q`
+- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_scan_bucket_returns_partial_failed_with_csv_for_objectkeys_failure tests/test_scan_end_to_end.py::test_scanner_run_marks_bucket_partial_failed_and_keeps_csv -q`
+- `& 'C:\\Users\\lzh\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe' -m pytest tests/test_scanner.py::test_scan_bucket_returns_partial_failed_with_csv_for_objectkeys_failure tests/test_scan_end_to_end.py::test_scanner_run_marks_bucket_partial_failed_and_keeps_csv tests/test_scanner.py::test_scan_bucket_finishes_filelist_and_metadata_before_objectkeys tests/test_scan_end_to_end.py::test_scanner_run_completes_with_mocked_obs_and_directory_csv -q`
 
 ## Validation result
 
-- The first focused run failed as expected before implementation because `_collect_prefixes()` did not accept `partial_errors` and `Scanner` had no `_objectkeys_progress_bar()`.
-- After the scanner change, the focused objectkeys suite passed: `4 passed in 0.45s`.
+- RED: the new Task 5 tests failed before the scanner change because `_scan_bucket()` still returned `success` after helper-level partial failures.
+- GREEN: the focused Task 5 suite passed after the wiring change: `4 passed in 0.43s`.
 
 ## Known risks
 
-- `_scan_bucket()` still does not pass `partial_errors` into metadata/objectkeys helper calls; that end-to-end partial status plumbing is intentionally deferred to Task 5.
-- Objectkeys failure logging now sanitizes exception text before emission to avoid leaking URLs or tokens, but only the helper-level path changed in this task.
+- Validation stayed intentionally focused on the exact Task 5 suite from the brief; broader regression coverage was not rerun in this session.
 
 ## Next recommended action
 
-Start Task 5 and wire the existing helper-level partial error tracking into bucket-level final status and manifest output.
+Proceed to the next queued task or run the broader scanner test suite if you want extra confidence before merging multiple task branches.

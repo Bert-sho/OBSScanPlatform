@@ -269,6 +269,78 @@ class SharedBucketOBSClient(FakeOBSClient):
         raise AssertionError(f"unexpected OBS URL: {url}")
 
 
+class PartialFailureOBSClient(FakeOBSClient):
+    async def get_json(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any],
+        headers: dict[str, str] | None = None,
+        endpoint: str = "unknown",
+    ) -> dict[str, Any]:
+        self.calls.append({"url": url, "params": params, "headers": headers})
+
+        if url.endswith("/rest/s3/listbuckets"):
+            return {
+                "result": {
+                    "buckets": [
+                        {
+                            "id": "owned-id",
+                            "name": "owned-bucket",
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "owner",
+                            "shareFrom": None,
+                        }
+                    ]
+                }
+            }
+
+        if url.endswith("/rest/s3/bucket/endpoint"):
+            return {"result": "https://owned-bucket.example/"}
+
+        if url.endswith("/rest/s3/bucket/filelist"):
+            request_body = _decode_base64_json(params["requestbody"])
+            if request_body["path"] == "/":
+                return {
+                    "result": {
+                        "files": [
+                            {"objectType": "folder", "objectKey": "good/"},
+                            {"objectType": "folder", "objectKey": "bad/"},
+                            {"objectType": "object", "objectKey": "root.txt"},
+                        ],
+                        "nextOffset": "",
+                    }
+                }
+            return {"result": {"files": [], "nextOffset": ""}}
+
+        if url.endswith("/rest/boto3/s3/object/metadata"):
+            return {
+                "result": {
+                    "objectKey": {
+                        "objectKey": "root.txt",
+                        "size": "12",
+                        "lastModifyTime": "1000",
+                    }
+                }
+            }
+
+        if url.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
+            prefix = _decode_base64_text(params["objectkey"]).lstrip("/")
+            if prefix == "bad/":
+                raise RuntimeError("prefix unavailable")
+            return {
+                "result": {
+                    "objectkeys": [
+                        {"objectKey": "good/file.txt", "size": "5", "lastModifyTime": "2000"},
+                    ],
+                    "truncated": "false",
+                }
+            }
+
+        raise AssertionError(f"unexpected OBS URL: {url}")
+
+
 @pytest.mark.asyncio
 async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path: Path, monkeypatch):
     FakeOBSClient.instances.clear()
@@ -350,6 +422,40 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
     persisted_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert persisted_manifest["status"] == "success"
     assert persisted_manifest["applications"][0]["buckets"][0]["csv_path"] == str(csv_path)
+
+
+@pytest.mark.asyncio
+async def test_scanner_run_marks_bucket_partial_failed_and_keeps_csv(tmp_path: Path, monkeypatch):
+    FakeOBSClient.instances.clear()
+    monkeypatch.setattr("obs_scan_platform.scanner.httpx.AsyncClient", DummyAsyncClient)
+    monkeypatch.setattr("obs_scan_platform.scanner.OBSClient", PartialFailureOBSClient)
+
+    config = AppConfigFile(
+        endpoint="https://global-obs-api.example",
+        defaults=Thresholds(
+            large_directory_bytes=10,
+            large_file_bytes=10,
+            inactive_directory_days=30,
+        ),
+        applications=[ApplicationConfig(appid="app.one", name="App One", apptoken="token-1")],
+    )
+    config.scan.results_dir = str(tmp_path / "results")
+    config.scan.keep_temp_files = True
+    config.scan.bucket_concurrency = 1
+    config.scan.objectkeys_concurrency_per_bucket = 1
+
+    manifest = await Scanner(config).run(run_id="run-1")
+
+    csv_path = tmp_path / "results" / "run-1" / "app.one" / "owned-bucket.csv"
+    bucket = manifest["applications"][0]["buckets"][0]
+    assert manifest["status"] == "partial_failed"
+    assert manifest["applications"][0]["status"] == "partial_failed"
+    assert bucket["status"] == "partial_failed"
+    assert bucket["csv_path"] == str(csv_path)
+    assert bucket["error"] is None
+    assert bucket["partial_errors"]["objectkeys_failed_prefixes"] == 1
+    assert bucket["partial_errors"]["samples"][0]["target"] == "bad/"
+    assert csv_path.exists()
 
 
 @pytest.mark.asyncio
