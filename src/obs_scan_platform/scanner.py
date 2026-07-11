@@ -66,6 +66,18 @@ def _iso_utc(timestamp_ms: int) -> str:
     return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+async def _gather_cancel_on_error(*coroutines: Any) -> list[Any]:
+    tasks = [asyncio.create_task(coroutine) for coroutine in coroutines]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 def _default_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -472,7 +484,7 @@ class Scanner:
                 tasks = scheduler.current_level()
                 if not tasks:
                     break
-                await asyncio.gather(
+                await _gather_cancel_on_error(
                     *(
                         self._process_filelist_task(
                             application,
@@ -653,7 +665,7 @@ class Scanner:
 
         worker_count = min(max(1, self.config.scan.metadata_concurrency_per_bucket), len(object_keys))
         if worker_count:
-            await asyncio.gather(*(worker() for _ in range(worker_count)))
+            await _gather_cancel_on_error(*(worker() for _ in range(worker_count)))
         if rows:
             append_object_rows(temp_dir / "metadata_files.csv", rows)
 
@@ -719,7 +731,7 @@ class Scanner:
         try:
             worker_count = min(max(1, self.config.scan.objectkeys_concurrency_limit()), len(prefixes))
             if worker_count:
-                await asyncio.gather(*(worker() for _ in range(worker_count)))
+                await _gather_cancel_on_error(*(worker() for _ in range(worker_count)))
         finally:
             if progress_bar is not None:
                 progress_bar.close()

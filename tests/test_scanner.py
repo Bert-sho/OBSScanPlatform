@@ -136,6 +136,36 @@ class FailingRootFilelistClient:
         raise detailed_request_error("filelist", "root filelist failed")
 
 
+class CancellingFilelistClient:
+    def __init__(self) -> None:
+        self.blocked_started = asyncio.Event()
+        self.cancellation_finished = asyncio.Event()
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        request_body = decode_request_body({"params": params})
+        path = request_body["path"]
+        if path == "/":
+            return {
+                "result": {
+                    "files": [
+                        {"objectType": "folder", "objectKey": "alpha/"},
+                        {"objectType": "folder", "objectKey": "bravo/"},
+                    ],
+                    "nextOffset": "",
+                }
+            }
+        if path == "/alpha/":
+            await self.blocked_started.wait()
+            raise RuntimeError("filelist parser bug")
+        self.blocked_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(0)
+            self.cancellation_finished.set()
+            raise
+
+
 class PhaseOrderClient:
     def __init__(self):
         self.phase_events: list[str] = []
@@ -549,6 +579,18 @@ async def test_discover_root_records_root_request_failure_and_returns_empty_disc
     assert partial_errors.filelist_failed_dirs == 1
     assert partial_errors.errors[0].scope == "directory"
     assert partial_errors.errors[0].scope_value == "/"
+
+
+@pytest.mark.asyncio
+async def test_discover_root_cancels_and_awaits_sibling_tasks_after_unexpected_exception():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    client = CancellingFilelistClient()
+
+    with pytest.raises(RuntimeError, match="filelist parser bug"):
+        await scanner._discover_root(application, bucket, client)
+
+    assert client.cancellation_finished.is_set()
 
 
 @pytest.mark.asyncio
@@ -1163,6 +1205,26 @@ class UnexpectedObjectkeysClient:
         raise RuntimeError("objectkeys parser bug")
 
 
+class CancellingWorkerClient:
+    def __init__(self, *, failure: str) -> None:
+        self.failure = failure
+        self.blocked_started = asyncio.Event()
+        self.cancellation_finished = asyncio.Event()
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        target = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
+        if target.startswith("bad"):
+            await self.blocked_started.wait()
+            raise RuntimeError(self.failure)
+        self.blocked_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(0)
+            self.cancellation_finished.set()
+            raise
+
+
 @pytest.mark.asyncio
 async def test_metadata_unexpected_exception_propagates(tmp_path: Path):
     scanner, application, bucket = make_scanner()
@@ -1191,6 +1253,44 @@ async def test_objectkeys_unexpected_exception_propagates(tmp_path: Path):
             UnexpectedObjectkeysClient(),
             partial_errors=PartialErrorSummary(),
         )
+
+
+@pytest.mark.asyncio
+async def test_metadata_cancels_and_awaits_sibling_workers_after_unexpected_exception(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    scanner.config.scan.metadata_concurrency_per_bucket = 2
+    client = CancellingWorkerClient(failure="metadata parser bug")
+
+    with pytest.raises(RuntimeError, match="metadata parser bug"):
+        await scanner._collect_metadata_files(
+            application,
+            bucket,
+            "http://bucket-endpoint",
+            ["bad.txt", "blocked.txt"],
+            tmp_path,
+            client,
+        )
+
+    assert client.cancellation_finished.is_set()
+
+
+@pytest.mark.asyncio
+async def test_objectkeys_cancels_and_awaits_sibling_workers_after_unexpected_exception(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    scanner.config.scan.objectkeys_concurrency_per_bucket = 2
+    client = CancellingWorkerClient(failure="objectkeys parser bug")
+
+    with pytest.raises(RuntimeError, match="objectkeys parser bug"):
+        await scanner._collect_prefixes(
+            application,
+            bucket,
+            "http://bucket-endpoint",
+            ["bad/", "blocked/"],
+            tmp_path,
+            client,
+        )
+
+    assert client.cancellation_finished.is_set()
 
 
 @pytest.mark.asyncio
