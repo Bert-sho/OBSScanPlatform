@@ -96,9 +96,11 @@ scan finished: success run_id=20260709T010203Z
 
 如果扫描状态不是 `success`，命令会以非 0 退出码结束。
 
-命令行扫描会为每个桶的 `filelist` 目录发现显示 `tqdm` 进度条。进度条只展示目录任务进度，不会打印每个 OBS 请求。
+命令行扫描会为每个桶的 `filelist` 目录发现和 `objectkeys` 前缀收集显示 `tqdm` 进度条。进度条不会打印每个成功的 OBS 请求。
 
-命令行输出和 `results/<run_id>/scan.log` 默认不会打印完整 OBS 请求链接、query、requestbody 或 token。请求失败仍会记录安全诊断信息，例如 `endpoint=objectkeys status=503 reason=busy`。
+正常成功请求的完整 URL 会被抑制。但每次失败尝试都会记录未脱敏的已准备 URL、最多 2048 个响应字符、尝试次数、状态、原因和截断信息。默认对可重试失败在首次请求后最多重试 3 次，即最多 4 次尝试。
+
+`scan.log` 和 `manifest.json` 必须按敏感数据处理：失败 URL 可能包含 token、编码请求体、对象键和分页游标，失败响应也可能暴露服务信息。请限制访问，未审查前不要提交或对外分享。
 
 ### 只扫描一个应用
 
@@ -187,7 +189,7 @@ curl -X POST http://127.0.0.1:8000/runs
 
 注意：当前 FastAPI 启动扫描时会按配置文件扫描所有启用应用；接口暂不支持传入 `appid` 或 `run_id`。需要按应用或固定 run_id 扫描时，请使用命令行方式。
 
-FastAPI 启动扫描时不会显示 `tqdm` 进度条。请通过 `results/<run_id>/scan.log` 或 `/runs/<run_id>/logs` 查看 filelist 进度和每个桶的总扫描耗时。
+FastAPI 启动扫描时不会显示 `tqdm` 终端进度条，但会把同样的 filelist 和 objectkeys 进度写入 `results/<run_id>/scan.log`。请通过该文件或 `/runs/<run_id>/logs` 查看。
 
 ### 查看扫描运行列表
 
@@ -231,13 +233,31 @@ curl -o owned-bucket.csv \
 
 每次扫描会生成：
 
-- `results/<run_id>/manifest.json`：本次扫描的应用、桶、状态和 CSV 路径。
-- `results/<run_id>/scan.log`：扫描日志，包含每个桶的 `filelist progress ... completed=<已完成任务数> total=<总任务数>` 和桶级 `elapsed_seconds`。
+- `results/<run_id>/manifest.json`：本次扫描的应用、桶、状态、CSV 路径、错误和时间。
+- `results/<run_id>/scan.log`：扫描日志，包含 filelist 进度，以及 objectkeys 前缀的 `completed` / `total` / `succeeded` / `failed` / `pages` / `objects` 进度。
 - `results/<run_id>/<appid>/<bucket>.csv`：每个桶一个目录级汇总 CSV。
 
 最终桶 CSV 只保存目录汇总信息，不保存完整文件清单。对象级临时 CSV 在扫描过程中写入 `results/<run_id>/_tmp/`，当 `scan.keep_temp_files` 为 `false` 且桶扫描成功时会自动清理。
 
 如果桶为空，或桶内只有空文件夹，扫描仍会成功，并生成只有表头的桶 CSV。
+
+### 请求失败边界
+
+- `listbuckets`：桶集合未知，当前应用失败，其他应用继续。
+- `bucket_endpoint`：当前桶失败且不生成 CSV，其他桶继续。
+- `filelist`：停止失败目录（包括根目录 `/`）的剩余分页，保留早先成功页和其他已发现目录，桶为 `partial_failed`。
+- `metadata`：只跳过失败对象，其他对象继续，桶为 `partial_failed`。
+- `objectkeys`：停止失败前缀的剩余分页，保留早先成功页和其他前缀，桶为 `partial_failed`。
+
+### 如何判读部分 CSV
+
+使用 CSV 前必须先检查 manifest 中对应桶的 `status`。`success` 表示聚合完成且没有最终可恢复请求失败；`partial_failed` 表示 CSV 不完整。此时：
+
+- `error` 是简短汇总；
+- `partial_errors` 保留兼容计数和有限样本；
+- `errors` 保留每个最终请求失败的详细记录。
+
+部分 CSV 会保留已成功收集的行，并缺少只能从失败请求获得的数据。未检查上述状态和错误字段前，不得将部分 CSV 视为完整结果。每个桶还有 `started_ms` / `ended_ms`、UTC `started_at` / `ended_at` 和单调计时的 `elapsed_seconds`。
 
 ## 常见问题
 
@@ -263,4 +283,4 @@ OBS_SCAN_CONFIG=config/apps.yaml uvicorn obs_scan_platform.api:app --reload
 curl http://127.0.0.1:8000/runs/<run_id>
 ```
 
-确认对应 bucket 的 `status` 是否为 `success`，以及 `csv_path` 是否存在。
+确认对应 bucket 的 `status` 和 `csv_path`。如果是 `partial_failed`，CSV 可能存在，但必须结合 `error`、`partial_errors` 和 `errors` 判断缺失范围。

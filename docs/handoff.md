@@ -2,94 +2,106 @@
 
 ## Timestamp
 
-2026-07-12 00:32:27 CST
+2026-07-12 01:13:54 CST (Asia/Shanghai)
 
 ## Machine/environment
 
-- Codex desktop app on macOS.
+- Codex desktop app on macOS (Darwin).
+- Python 3.11.6, pytest 9.1.1.
 - Worktree: `/Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform`
 - Branch: `codex/obs-scan-platform`
-- Timezone: Asia/Shanghai
-- Git binary: `/opt/homebrew/bin/git`
 
 ## Current branch
 
 `codex/obs-scan-platform`
 
-## Latest commit before this planning session
+## Latest commit before this session
 
-`3fcd4338cea6451e56115c8ff96fe26aae8b854f`
+`cfdc381` (`feat: expand objectkeys scan progress`)
 
 ## Latest commit after this session
 
-The planning commit containing this handoff is the latest session commit. Resolve its immutable hash with:
+The commit with message `docs: finalize OBS fallback diagnostics handoff` contains this handoff. Resolve its immutable hash with:
 
 ```bash
-/opt/homebrew/bin/git rev-parse HEAD
+git log -1 --format='%H %s'
 ```
 
 ## Summary of what changed
 
-- Treated the user's “请继续” as approval of the written 2026-07-12 spec and entered `superpowers:writing-plans`.
-- Inspected current shared-branch implementations in config, request client, models, scheduler, scanner, and tests.
-- Created a five-task TDD implementation plan at `docs/superpowers/plans/2026-07-12-obs-request-fallback-and-progress.md`.
-- Planned only the delta from the existing first-version fallback implementation.
-- Added explicit design language preserving successful filelist pages after a later page failure.
-- Updated mandatory task and handoff documentation.
+- Expanded the end-to-end partial scan fake from one failure to three final structured request failures: one child filelist directory, one metadata object, and one objectkeys prefix after a successful first page.
+- Used only synthetic request credentials (`token=test-token`) and synthetic `.example` hosts.
+- Added persisted manifest equality, complete error schema, compatibility counters, timing, and partial directory CSV assertions.
+- Updated English and Chinese operator documentation for diagnostics, fallback boundaries, partial results, timing, objectkeys progress, and CLI/API presentation.
+- Updated mandatory task state and cross-machine resume instructions.
 
 ## Important decisions and rationale
 
-- Request diagnostics and retry classification are implemented first because all later manifest details depend on a structured `OBSRequestError`.
-- Error and progress data models are implemented second to give scanner tasks stable typed interfaces.
-- Scanner fallback and timing are separate from objectkeys presentation so each behavior has a focused review gate.
-- Existing sanitized, bounded `partial_errors` remains for compatibility while new detailed `errors` carries raw final request diagnostics.
-- Local fallback catches only `OBSRequestError`; generic programming and filesystem exceptions remain hard failures.
-- Root and child filelist tasks retain successful earlier-page discoveries, matching the approved partial-data rule and superseding the current rollback behavior.
-- Objectkeys progress uses a shared event-loop-owned state object; no lock is needed because state mutations do not cross threads or contain awaits.
+- Used a child filelist failure rather than a root failure so the same scan demonstrates continued directory work and aggregation; root fallback is already covered by focused scanner tests.
+- Made objectkeys page one succeed and page two fail to prove successful pagination data is not rolled back.
+- Kept the directory CSV schema and every API/manifest compatibility field unchanged.
+- Did not add production code because Tasks 1–4 already satisfied the new integration test on its first run, as the Task 5 brief expected.
+- Did not push because the controller explicitly reserved final whole-branch review and push.
 
 ## Failed attempts or rejected approaches
 
-- Did not start implementation during planning.
-- Rejected recreating existing fallback, partial status, or basic progress code.
-- Rejected keeping child filelist rollback because it conflicts with the approved requirement to preserve successful earlier pages.
-- Rejected continuing to catch every `Exception` inside workers because it hides programming and filesystem defects.
+- No test or build command failed.
+- The new integration test passed on its first run (`1 passed in 0.09s`); no artificial production-code RED was introduced because this task persists proof of already implemented behavior.
+- Rejected real credentials and live OBS calls; all end-to-end evidence is deterministic and synthetic.
+- Rejected changing the CSV schema or API routes because compatibility is required.
 
 ## Current test/build status
 
-- No tests were run during this documentation-only planning task.
-- Shared-branch baseline remains: focused Windows scanner suite `69 passed`; full Windows suite `116 passed, 6 failed, 1 warning`, with six documented platform assumptions.
-- Execution must run targeted and full test suites on macOS before completion.
+Targeted integration:
+
+```text
+pytest tests/test_scan_end_to_end.py::test_scanner_run_marks_bucket_partial_failed_and_keeps_csv -q
+1 passed in 0.09s
+```
+
+Targeted scanner suite:
+
+```text
+pytest tests/test_config.py tests/test_obs_client.py tests/test_models.py tests/test_scanner.py tests/test_scan_end_to_end.py -v
+101 passed in 0.32s
+```
+
+Full macOS suite:
+
+```text
+pytest -q
+143 passed, 1 warning in 0.47s
+```
+
+The warning is the existing dependency-side `StarletteDeprecationWarning` from `fastapi/testclient.py` about `httpx` and `starlette.testclient`; there are no failures.
 
 ## Uncommitted changes, if any
 
-After the planning commit and push, none are expected. Confirm with:
+The five Task 5 files are committed by `docs: finalize OBS fallback diagnostics handoff`. No push was attempted. Confirm worktree state with:
 
 ```bash
-/opt/homebrew/bin/git status --short --branch
+git status --short --branch
 ```
+
+## Sensitive-output and repository review
+
+- Failed URLs and response bodies in operational logs/manifests are intentionally sensitive; operators must restrict them.
+- Test values use only `test-token`, `.example` hosts, and synthetic response bodies.
+- Final review commands and results are recorded in the Task 5 report at `.superpowers/sdd/task-5-report.md`; that coordination artifact is not part of the product commit.
 
 ## Exact resume instructions
 
-1. Enter the active worktree and update the branch:
-
 ```bash
 cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
-/opt/homebrew/bin/git fetch origin
-/opt/homebrew/bin/git status --short --branch
+git status --short --branch
+git log --oneline -8
+git diff origin/codex/obs-scan-platform...HEAD --stat
+git diff origin/codex/obs-scan-platform...HEAD
+pytest -q
+git push -u origin HEAD
+git status --short --branch
+git rev-parse HEAD
+git rev-parse origin/codex/obs-scan-platform
 ```
 
-2. Read the approved design and implementation plan:
-
-```bash
-sed -n '1,380p' docs/superpowers/specs/2026-07-12-obs-request-fallback-and-progress-design.md
-sed -n '1,1240p' docs/superpowers/plans/2026-07-12-obs-request-fallback-and-progress.md
-```
-
-3. Choose exactly one execution workflow:
-
-- `superpowers:subagent-driven-development` for a fresh implementation agent and review gate per task;
-- `superpowers:executing-plans` for inline batch execution with checkpoints.
-
-4. Execute Tasks 1-5 in order. Do not skip the failing-test checks or combine commit boundaries.
-
-5. Before completion, run the targeted suite and `pytest -q` on macOS, update both handoff files, inspect the full diff for unrelated edits and secrets, commit, and push.
+The last two hashes must match after the controller's push.

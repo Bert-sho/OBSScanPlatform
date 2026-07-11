@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Plan the next OBS request diagnostics, fallback, manifest, timing, and progress revision
+Finalize end-to-end partial scan evidence and operator handoff
 
 ## Current branch
 
@@ -14,55 +14,59 @@ Plan the next OBS request diagnostics, fallback, manifest, timing, and progress 
 
 ## User goal
 
-Continue from the approved 2026-07-12 design and create an executable, test-driven delta plan against the first-version fallback implementation already present on the shared branch.
+Complete Task 5 of the approved OBS request fallback and progress plan: prove a three-endpoint partial scan persists its manifest and usable partial CSV, document operator behavior and sensitivity boundaries, and leave an exact cross-machine handoff. The controller explicitly reserved final whole-branch review and push.
 
 ## Completed work
 
-- Confirmed the written design was approved for planning.
-- Read the Superpowers writing-plans workflow and mapped current runtime and test files.
-- Preserved the shared-branch baseline rather than planning duplicate first-version work.
-- Split execution into five independently reviewable tasks: request diagnostics, models, fallback/timing, objectkeys progress, and integration/handoff.
-- Specified exact interfaces, failing tests, minimal implementation contracts, validation commands, expected outcomes, and commit boundaries.
-- Clarified in the design that successful filelist pages must not be rolled back after a later page failure.
-- Wrote the implementation plan at `docs/superpowers/plans/2026-07-12-obs-request-fallback-and-progress.md`.
+- Replaced the single partial-failure integration fake with synthetic structured `OBSRequestError` failures for filelist, metadata, and objectkeys.
+- Proved a failed objectkeys prefix preserves a successful first page, while another prefix and one metadata object succeed.
+- Asserted returned and persisted bucket manifests are identical, contain all compatibility/detail/timing fields, and report exactly three request failures.
+- Asserted the partial directory CSV retains successful rollups and excludes the failed-only metadata object.
+- Documented request logging, retry, fallback, sensitivity, partial CSV, timing, progress, CLI, and API behavior.
+- Ran targeted and full test suites on macOS.
+
+Tasks 1–4 were delivered by these commits:
+
+- `c4c8ddb` `feat: add detailed OBS request diagnostics`
+- `7dee674` `feat: model detailed bucket request failures`
+- `9194e81` `fix: enforce objectkeys progress invariants`
+- `91d3f09` `feat: refine OBS endpoint fallback and bucket timing`
+- `5d65fe4` `fix: cancel sibling scan workers on failure`
+- `cfdc381` `feat: expand objectkeys scan progress`
 
 ## Remaining work
 
-- Choose an execution mode: subagent-driven development or inline executing-plans.
-- Execute the plan using TDD.
-- Run targeted and full macOS validation.
-- Update final task/handoff state, commit, and push implementation changes.
+- Controller: perform the final whole-branch review.
+- Controller: push `codex/obs-scan-platform` after any review fixes.
 
 ## Key files changed
 
-- `docs/superpowers/plans/2026-07-12-obs-request-fallback-and-progress.md`
-- `docs/superpowers/specs/2026-07-12-obs-request-fallback-and-progress-design.md`
+- `tests/test_scan_end_to_end.py`
+- `README.md`
+- `docs/scan-start-guide.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
-- `rg -n "TBD|TODO|implement later|fill in details|similar to task" docs/superpowers/plans/2026-07-12-obs-request-fallback-and-progress.md`
-- `rg -n "OBSRequestError|PartialErrorSummary|ObjectkeysProgress|BucketScanResult" docs/superpowers/plans/2026-07-12-obs-request-fallback-and-progress.md`
-- `git diff --check`
-- `git status`
-- `git diff --stat`
-- `git diff`
+- `pytest tests/test_scan_end_to_end.py::test_scanner_run_marks_bucket_partial_failed_and_keeps_csv -q`
+- `pytest tests/test_config.py tests/test_obs_client.py tests/test_models.py tests/test_scanner.py tests/test_scan_end_to_end.py -v`
+- `pytest -q`
+- Final diff, whitespace, status, and secret-boundary commands are recorded in `docs/handoff.md`.
 
 ## Validation result
 
-- Plan covers every approved design requirement and preserves existing compatibility exceptions.
-- Type names and task-to-task interfaces were checked for consistency.
-- Placeholder and whitespace checks passed.
-- No implementation tests were run because this task changes planning documentation only.
+- End-to-end integration: `1 passed in 0.09s`.
+- Final targeted scanner validation: `101 passed in 0.32s`.
+- Final full macOS suite: `143 passed, 1 warning in 0.47s`.
+- The warning is a dependency-side `StarletteDeprecationWarning` from FastAPI's `TestClient`; no test failed.
 
 ## Known risks
 
-- Failure logs and detailed manifest errors intentionally retain sensitive URL/body data.
-- Existing first-version tests assert sanitization and root hard failure; implementation must intentionally replace those expectations rather than layering contradictory behavior on top.
-- The plan removes filelist rollback because the approved behavior preserves successful earlier pages; regression tests must prove coverage remains non-duplicated.
-- Full macOS validation is required because the prior shared-branch full suite was red only on a Windows environment.
+- Failed attempts intentionally write unredacted URLs and up to 2048 response characters to logs; final failures persist the same sensitive context in manifests.
+- Operators must treat logs/manifests as sensitive and must not interpret `partial_failed` CSVs as complete without checking `error`, `partial_errors`, and `errors`.
+- The branch is intentionally not pushed in this Task 5 session; final review and push belong to the controller.
 
 ## Next recommended action
 
-Choose the plan execution mode. Subagent-driven development is recommended for independent review after each task; inline execution is available for checkpointed work in this session.
+Review the Task 5 commit and full branch diff, rerun `pytest -q`, then push `codex/obs-scan-platform` and verify the remote hash.

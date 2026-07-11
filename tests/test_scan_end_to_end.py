@@ -308,18 +308,46 @@ class PartialFailureOBSClient(FakeOBSClient):
                         "files": [
                             {"objectType": "folder", "objectKey": "good/"},
                             {"objectType": "folder", "objectKey": "bad/"},
-                            {"objectType": "object", "objectKey": "root.txt"},
+                            {"objectType": "folder", "objectKey": "paged/"},
+                            {"objectType": "object", "objectKey": "good-metadata.txt"},
+                            {"objectType": "object", "objectKey": "failed-only.txt"},
                         ],
                         "nextOffset": "",
                     }
                 }
+            if request_body["path"] == "/bad/":
+                raise OBSRequestError(
+                    endpoint="filelist",
+                    status_code=503,
+                    reason="directory unavailable",
+                    url="https://global-obs-api.example/rest/s3/bucket/filelist?token=test-token",
+                    response_body='{"success":false,"msg":"directory unavailable"}',
+                    response_body_truncated=False,
+                    response_body_original_chars=47,
+                    exception_type="OBSBusinessError",
+                    attempts=4,
+                )
             return {"result": {"files": [], "nextOffset": ""}}
 
         if url.endswith("/rest/boto3/s3/object/metadata"):
+            object_key = _decode_base64_text(params["objectkey"]).lstrip("/")
+            if object_key == "failed-only.txt":
+                raise OBSRequestError(
+                    endpoint="metadata",
+                    status_code=404,
+                    reason="object missing",
+                    url="https://owned-bucket.example/rest/boto3/s3/object/metadata?token=test-token",
+                    response_body='{"success":false,"msg":"object missing"}',
+                    response_body_truncated=False,
+                    response_body_original_chars=40,
+                    exception_type="HTTPStatusError",
+                    attempts=1,
+                )
+            assert object_key == "good-metadata.txt"
             return {
                 "result": {
                     "objectKey": {
-                        "objectKey": "root.txt",
+                        "objectKey": "good-metadata.txt",
                         "size": "12",
                         "lastModifyTime": "1000",
                     }
@@ -328,22 +356,32 @@ class PartialFailureOBSClient(FakeOBSClient):
 
         if url.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
             prefix = _decode_base64_text(params["objectkey"]).lstrip("/")
-            if prefix == "bad/":
+            if prefix == "paged/" and params["nextmarker"] == "page-2":
                 raise OBSRequestError(
                     endpoint="objectkeys",
                     status_code=503,
-                    reason="prefix unavailable",
-                    url=url,
-                    response_body='{"success":false,"msg":"unavailable"}',
+                    reason="next page unavailable",
+                    url="https://owned-bucket.example/rest/boto3/s3/list/bucket/objectkeys?token=test-token",
+                    response_body='{"success":false,"msg":"next page unavailable"}',
                     response_body_truncated=False,
-                    response_body_original_chars=37,
+                    response_body_original_chars=49,
                     exception_type="OBSBusinessError",
-                    attempts=1,
+                    attempts=4,
                 )
+            if prefix == "paged/":
+                return {
+                    "result": {
+                        "objectkeys": [
+                            {"objectKey": "paged/kept-first-page.txt", "size": "7", "lastModifyTime": "3000"}
+                        ],
+                        "truncated": "true",
+                        "nextmarker": "page-2",
+                    }
+                }
             return {
                 "result": {
                     "objectkeys": [
-                        {"objectKey": "good/file.txt", "size": "5", "lastModifyTime": "2000"},
+                        {"objectKey": f"{prefix}success.txt", "size": "5", "lastModifyTime": "2000"},
                     ],
                     "truncated": "false",
                 }
@@ -465,12 +503,30 @@ async def test_scanner_run_marks_bucket_partial_failed_and_keeps_csv(tmp_path: P
     assert manifest["applications"][0]["status"] == "partial_failed"
     assert bucket["status"] == "partial_failed"
     assert bucket["csv_path"] == str(csv_path)
-    assert "prefix unavailable" in bucket["error"]
-    assert bucket["errors"][0]["scope"] == "prefix"
-    assert bucket["errors"][0]["scope_value"] == "bad/"
+    assert bucket["error"].startswith("3 request failures;")
+    assert len(bucket["errors"]) == 3
+    assert {error["endpoint"] for error in bucket["errors"]} == {"filelist", "metadata", "objectkeys"}
+    assert all(error["url"].startswith("https://") for error in bucket["errors"])
+    assert all("response_body" in error for error in bucket["errors"])
+    assert bucket["partial_errors"]["filelist_failed_dirs"] == 1
+    assert bucket["partial_errors"]["metadata_failed_files"] == 1
     assert bucket["partial_errors"]["objectkeys_failed_prefixes"] == 1
-    assert bucket["partial_errors"]["samples"][0]["target"] == "bad/"
+    assert bucket["started_ms"] <= bucket["ended_ms"]
+    assert bucket["started_at"].endswith("Z")
+    assert bucket["ended_at"].endswith("Z")
+    assert bucket["elapsed_seconds"] >= 0
     assert csv_path.exists()
+
+    persisted = json.loads((tmp_path / "results" / "run-1" / "manifest.json").read_text(encoding="utf-8"))
+    assert persisted["applications"][0]["buckets"][0] == bucket
+
+    csv_text = csv_path.read_text(encoding="utf-8")
+    assert "good-metadata.txt" not in csv_text  # CSV schema remains directory-level only.
+    assert "failed-only.txt" not in csv_text
+    rows = {row["directory_path"]: row for row in csv.DictReader(csv_text.splitlines())}
+    assert rows["/"]["object_count"] == "4"
+    assert rows["/good/"]["object_count"] == "1"
+    assert rows["/paged/"]["object_count"] == "1"
 
 
 @pytest.mark.asyncio

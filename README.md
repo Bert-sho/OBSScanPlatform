@@ -76,7 +76,7 @@ Run a scan for all enabled applications:
 obs-scan scan --config config/apps.yaml
 ```
 
-CLI scans display a `tqdm` progress bar for each bucket's `filelist` directory discovery. Detailed progress is also written to `results/<run_id>/scan.log`.
+CLI scans display `tqdm` progress bars for each bucket's `filelist` directory discovery and `objectkeys` prefix collection. Detailed progress is also written to `results/<run_id>/scan.log`.
 
 Run a scan for one application ID:
 
@@ -110,13 +110,13 @@ Useful endpoints:
 
 The manual scan trigger uses an in-process `active_scan` guard. Run the API with a single worker for this version; multiple API workers do not share that guard.
 
-FastAPI-triggered scans do not show terminal progress bars. Use `GET /runs/{run_id}/logs` or read `results/<run_id>/scan.log` to view `filelist` progress and per-bucket elapsed time.
+FastAPI-triggered scans do not show terminal progress bars. They write the same filelist and objectkeys progress to `results/<run_id>/scan.log`; use `GET /runs/{run_id}/logs` or read that file directly.
 
 ## Results
 
 By default, scan output is written under `results/<run_id>/`.
 
-Each successful bucket writes one directory summary CSV:
+Each successfully aggregated bucket writes one directory summary CSV, including a bucket that finishes `partial_failed`:
 
 ```text
 results/<run_id>/<appid>/<bucket>.csv
@@ -129,9 +129,21 @@ Each run also writes:
 - `results/<run_id>/manifest.json`
 - `results/<run_id>/scan.log`
 
-`scan.log` includes per-bucket filelist progress lines such as `filelist progress ... completed=<completed> total=<total>` and bucket duration fields such as `elapsed_seconds=...`.
+`scan.log` includes per-bucket filelist progress lines and objectkeys progress fields `completed`, `total`, `succeeded`, `failed`, `pages`, and `objects`. Every bucket manifest entry includes `started_ms`, `ended_ms`, `started_at`, `ended_at`, and monotonic `elapsed_seconds` timing fields.
 
-Default terminal output and `scan.log` do not print full OBS request URLs, query strings, encoded request bodies, or tokens. Failed OBS requests still include safe diagnostics such as `endpoint=objectkeys status=503 reason=busy`.
+Normal successful requests suppress full OBS URLs. Every failed attempt logs its unredacted prepared URL and up to 2048 response characters, together with attempt counters, status, reason, truncation metadata, and exception type. The default retry policy makes up to three retries after the initial request (four attempts total) for retryable failures.
+
+Treat `scan.log` and `manifest.json` as sensitive data: failed URLs can contain tokens, encoded request bodies, object keys, and pagination cursors, and failed response bodies can contain service details. Restrict access and do not commit or share these files without review.
+
+The five request fallback boundaries are:
+
+- `listbuckets`: the current application fails because its bucket set is unknown; other applications continue.
+- `bucket_endpoint`: the current bucket fails and has no CSV; other buckets continue.
+- `filelist`: only the failed directory's remaining pages stop, including for root `/`; successful earlier pages and other discovered directory tasks remain, and the bucket becomes `partial_failed`.
+- `metadata`: only the failed object is skipped; other objects continue and the bucket becomes `partial_failed`.
+- `objectkeys`: only the failed prefix's remaining pages stop; rows from earlier successful pages and other prefixes remain, and the bucket becomes `partial_failed`.
+
+Before consuming a CSV, inspect its bucket entry in `manifest.json`. `status=success` means aggregation finished without a final recoverable request failure. `status=partial_failed` means the CSV is incomplete: `error` gives a concise summary, `partial_errors` gives compatibility counters and bounded samples, and `errors` contains every detailed final request failure. A partial CSV preserves successful rows and excludes data available only through failed requests; it must not be treated as complete without evaluating those fields.
 
 Empty buckets and buckets containing only empty folders still finish successfully. They produce a bucket CSV with only the final header row.
 
