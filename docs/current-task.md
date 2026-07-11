@@ -22,6 +22,7 @@ Complete Task 5 of the approved OBS request fallback and progress plan: prove a 
 - Proved a failed objectkeys prefix preserves a successful first page, while another prefix and one metadata object succeed.
 - Asserted returned and persisted bucket manifests are identical, contain all compatibility/detail/timing fields, and report exactly three request failures.
 - Asserted the partial directory CSV retains successful rollups and excludes the failed-only metadata object.
+- Strengthened review coverage to assert every detailed failure dictionary exactly, keyed by endpoint, including scope, URL, status, response metadata, exception type, and attempt count.
 - Documented request logging, retry, fallback, sensitivity, partial CSV, timing, progress, CLI, and API behavior.
 - Ran targeted and full test suites on macOS.
 
@@ -56,9 +57,9 @@ Tasks 1–4 were delivered by these commits:
 
 ## Validation result
 
-- End-to-end integration: `1 passed in 0.09s`.
-- Final targeted scanner validation: `101 passed in 0.32s`.
-- Final full macOS suite: `143 passed, 1 warning in 0.47s`.
+- Review-fix end-to-end integration: `1 passed in 0.08s`.
+- Review-fix targeted scanner validation: `101 passed in 0.34s`.
+- Review-fix full macOS suite: `143 passed, 1 warning in 0.48s`.
 - The warning is a dependency-side `StarletteDeprecationWarning` from FastAPI's `TestClient`; no test failed.
 
 ## Known risks

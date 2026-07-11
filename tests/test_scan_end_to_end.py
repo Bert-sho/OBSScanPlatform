@@ -505,9 +505,48 @@ async def test_scanner_run_marks_bucket_partial_failed_and_keeps_csv(tmp_path: P
     assert bucket["csv_path"] == str(csv_path)
     assert bucket["error"].startswith("3 request failures;")
     assert len(bucket["errors"]) == 3
-    assert {error["endpoint"] for error in bucket["errors"]} == {"filelist", "metadata", "objectkeys"}
-    assert all(error["url"].startswith("https://") for error in bucket["errors"])
-    assert all("response_body" in error for error in bucket["errors"])
+    errors_by_endpoint = {error["endpoint"]: error for error in bucket["errors"]}
+    assert errors_by_endpoint == {
+        "filelist": {
+            "endpoint": "filelist",
+            "scope": "directory",
+            "scope_value": "/bad/",
+            "url": "https://global-obs-api.example/rest/s3/bucket/filelist?token=test-token",
+            "status_code": 503,
+            "reason": "directory unavailable",
+            "response_body": '{"success":false,"msg":"directory unavailable"}',
+            "response_body_truncated": False,
+            "response_body_original_chars": 47,
+            "exception_type": "OBSBusinessError",
+            "attempts": 4,
+        },
+        "metadata": {
+            "endpoint": "metadata",
+            "scope": "object_key",
+            "scope_value": "failed-only.txt",
+            "url": "https://owned-bucket.example/rest/boto3/s3/object/metadata?token=test-token",
+            "status_code": 404,
+            "reason": "object missing",
+            "response_body": '{"success":false,"msg":"object missing"}',
+            "response_body_truncated": False,
+            "response_body_original_chars": 40,
+            "exception_type": "HTTPStatusError",
+            "attempts": 1,
+        },
+        "objectkeys": {
+            "endpoint": "objectkeys",
+            "scope": "prefix",
+            "scope_value": "paged/",
+            "url": "https://owned-bucket.example/rest/boto3/s3/list/bucket/objectkeys?token=test-token",
+            "status_code": 503,
+            "reason": "next page unavailable",
+            "response_body": '{"success":false,"msg":"next page unavailable"}',
+            "response_body_truncated": False,
+            "response_body_original_chars": 49,
+            "exception_type": "OBSBusinessError",
+            "attempts": 4,
+        },
+    }
     assert bucket["partial_errors"]["filelist_failed_dirs"] == 1
     assert bucket["partial_errors"]["metadata_failed_files"] == 1
     assert bucket["partial_errors"]["objectkeys_failed_prefixes"] == 1

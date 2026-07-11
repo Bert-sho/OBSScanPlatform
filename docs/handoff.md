@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-2026-07-12 01:13:54 CST (Asia/Shanghai)
+2026-07-12 01:18:13 CST (Asia/Shanghai)
 
 ## Machine/environment
 
@@ -19,11 +19,16 @@
 
 `cfdc381` (`feat: expand objectkeys scan progress`)
 
-## Latest commit after this session
+## Latest Task 5 implementation/integration commit
 
-The commit with message `docs: finalize OBS fallback diagnostics handoff` contains this handoff. Resolve its immutable hash with:
+`de5d3c046e82adae4c6e9ea4d4247e75da52864b` (`docs: finalize OBS fallback diagnostics handoff`)
+
+## Branch tip after this review-fix session
+
+The subsequent review-fix commit contains this revised handoff and is the branch tip. A commit cannot contain its own final hash, so resolve that immutable hash after the commit with:
 
 ```bash
+git rev-parse HEAD
 git log -1 --format='%H %s'
 ```
 
@@ -63,24 +68,26 @@ Targeted scanner suite:
 
 ```text
 pytest tests/test_config.py tests/test_obs_client.py tests/test_models.py tests/test_scanner.py tests/test_scan_end_to_end.py -v
-101 passed in 0.32s
+101 passed in 0.34s
 ```
 
 Full macOS suite:
 
 ```text
 pytest -q
-143 passed, 1 warning in 0.47s
+143 passed, 1 warning in 0.48s
 ```
 
 The warning is the existing dependency-side `StarletteDeprecationWarning` from `fastapi/testclient.py` about `httpx` and `starlette.testclient`; there are no failures.
 
 ## Uncommitted changes, if any
 
-The five Task 5 files are committed by `docs: finalize OBS fallback diagnostics handoff`. No push was attempted. Confirm worktree state with:
+At the handoff snapshot, the Task 5 implementation/integration files are committed in `de5d3c046e82adae4c6e9ea4d4247e75da52864b`. The complete detailed-error test and this handoff correction are committed in the subsequent review-fix branch-tip commit described above. No product changes are expected to remain uncommitted, and no push was attempted. Confirm rather than relying on the commit subject:
 
 ```bash
 git status --short --branch
+git rev-parse HEAD
+git show --stat --oneline HEAD
 ```
 
 ## Sensitive-output and repository review
@@ -95,8 +102,12 @@ git status --short --branch
 cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
 git status --short --branch
 git log --oneline -8
+git show --stat --oneline de5d3c046e82adae4c6e9ea4d4247e75da52864b
+git show --stat --oneline HEAD
 git diff origin/codex/obs-scan-platform...HEAD --stat
 git diff origin/codex/obs-scan-platform...HEAD
+pytest tests/test_scan_end_to_end.py::test_scanner_run_marks_bucket_partial_failed_and_keeps_csv -q
+pytest tests/test_config.py tests/test_obs_client.py tests/test_models.py tests/test_scanner.py tests/test_scan_end_to_end.py -v
 pytest -q
 git push -u origin HEAD
 git status --short --branch
