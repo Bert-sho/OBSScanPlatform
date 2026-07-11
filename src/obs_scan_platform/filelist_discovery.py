@@ -60,28 +60,6 @@ class FilelistDiscoveryScheduler:
         if prefix:
             self._discovered_prefixes.discard(f"{prefix}/")
 
-    def rollback_failed_task(self, task: FilelistTask) -> None:
-        prefix = task.path.strip("/")
-        if not prefix:
-            return
-        failed_prefix = f"{prefix}/"
-        self._discovered_prefixes = {
-            discovered_prefix
-            for discovered_prefix in self._discovered_prefixes
-            if discovered_prefix != failed_prefix and not discovered_prefix.startswith(failed_prefix)
-        }
-        self._direct_files = [
-            object_key for object_key in self._direct_files if not object_key.startswith(failed_prefix)
-        ]
-        self._next_level = [
-            queued_task for queued_task in self._next_level if not queued_task.path.startswith(task.path)
-        ]
-        self._queued_paths = {
-            queued_path
-            for queued_path in self._queued_paths
-            if queued_path == task.path or not queued_path.startswith(task.path)
-        }
-
     def mark_completed(self, task: FilelistTask) -> None:
         self._scanned_paths.add(task.path)
         self._completed_tasks += 1

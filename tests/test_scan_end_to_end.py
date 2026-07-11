@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds
+from obs_scan_platform.obs_client import OBSRequestError
 from obs_scan_platform.scanner import Scanner
 
 
@@ -328,7 +329,17 @@ class PartialFailureOBSClient(FakeOBSClient):
         if url.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
             prefix = _decode_base64_text(params["objectkey"]).lstrip("/")
             if prefix == "bad/":
-                raise RuntimeError("prefix unavailable")
+                raise OBSRequestError(
+                    endpoint="objectkeys",
+                    status_code=503,
+                    reason="prefix unavailable",
+                    url=url,
+                    response_body='{"success":false,"msg":"unavailable"}',
+                    response_body_truncated=False,
+                    response_body_original_chars=37,
+                    exception_type="OBSBusinessError",
+                    attempts=1,
+                )
             return {
                 "result": {
                     "objectkeys": [
@@ -385,21 +396,23 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
 
     csv_path = tmp_path / "results" / "run-1" / "app.one" / "owned-bucket.csv"
     assert manifest["status"] == "success"
-    assert manifest["applications"][0]["buckets"] == [
-        {
-            "bucket_name": "owned-bucket",
-            "bucket_id": "owned-id",
-            "status": "success",
-            "csv_path": str(csv_path),
-            "thresholds": {
-                "large_directory_bytes": 10,
-                "large_file_bytes": 10,
-                "inactive_directory_days": 30,
-                "filelist_depth": 5,
-            },
-            "error": None,
-        }
-    ]
+    bucket_manifest = manifest["applications"][0]["buckets"][0]
+    assert bucket_manifest["bucket_name"] == "owned-bucket"
+    assert bucket_manifest["bucket_id"] == "owned-id"
+    assert bucket_manifest["status"] == "success"
+    assert bucket_manifest["csv_path"] == str(csv_path)
+    assert bucket_manifest["thresholds"] == {
+        "large_directory_bytes": 10,
+        "large_file_bytes": 10,
+        "inactive_directory_days": 30,
+        "filelist_depth": 5,
+    }
+    assert bucket_manifest["error"] is None
+    assert bucket_manifest["errors"] == []
+    assert bucket_manifest["started_ms"] <= bucket_manifest["ended_ms"]
+    assert bucket_manifest["started_at"].endswith("Z")
+    assert bucket_manifest["ended_at"].endswith("Z")
+    assert bucket_manifest["elapsed_seconds"] >= 0
     assert csv_path.exists()
 
     rows = {row["directory_path"]: row for row in csv.DictReader(csv_path.open(newline="", encoding="utf-8"))}
@@ -452,7 +465,9 @@ async def test_scanner_run_marks_bucket_partial_failed_and_keeps_csv(tmp_path: P
     assert manifest["applications"][0]["status"] == "partial_failed"
     assert bucket["status"] == "partial_failed"
     assert bucket["csv_path"] == str(csv_path)
-    assert bucket["error"] is None
+    assert "prefix unavailable" in bucket["error"]
+    assert bucket["errors"][0]["scope"] == "prefix"
+    assert bucket["errors"][0]["scope_value"] == "bad/"
     assert bucket["partial_errors"]["objectkeys_failed_prefixes"] == 1
     assert bucket["partial_errors"]["samples"][0]["target"] == "bad/"
     assert csv_path.exists()

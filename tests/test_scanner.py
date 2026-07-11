@@ -5,6 +5,7 @@ import json
 import inspect
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -82,7 +83,7 @@ class FailingChildFilelistClient:
                 }
             }
         if request_body["path"] == "/alpha/":
-            raise RuntimeError("child filelist failed")
+            raise detailed_request_error("filelist", "child filelist failed")
         return {"result": {"files": [{"objectType": "folder", "objectKey": "bravo/child/"}], "nextOffset": ""}}
 
 
@@ -114,7 +115,8 @@ class PaginatedFailingChildFilelistClient:
                         "nextOffset": "page-2",
                     }
                 }
-            raise RuntimeError(
+            raise detailed_request_error(
+                "filelist",
                 "child filelist failed for https://obs.example/private/path?token=secret-token&access_token=abc123"
             )
         if request_body["path"] == "/bravo/":
@@ -131,7 +133,7 @@ class FailingRootFilelistClient:
     async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
         request_body = decode_request_body({"params": params})
         assert request_body["path"] == "/"
-        raise RuntimeError("root filelist failed")
+        raise detailed_request_error("filelist", "root filelist failed")
 
 
 class PhaseOrderClient:
@@ -500,7 +502,7 @@ async def test_discover_root_records_child_filelist_failure_and_continues():
 
     discovery = await scanner._discover_root(application, bucket, client, partial_errors=partial_errors)
 
-    assert discovery.prefixes == ["bravo/"]
+    assert discovery.prefixes == ["alpha/", "bravo/"]
     assert partial_errors.to_manifest()["filelist_failed_dirs"] == 1
     assert partial_errors.to_manifest()["samples"][0]["target"] == "/alpha/"
     requested_paths = [decode_request_body(call)["path"] for call in client.calls]
@@ -510,7 +512,7 @@ async def test_discover_root_records_child_filelist_failure_and_continues():
 
 
 @pytest.mark.asyncio
-async def test_discover_root_prunes_partial_child_filelist_results_after_paginated_failure():
+async def test_discover_root_preserves_successful_child_filelist_pages_after_later_failure():
     scanner, application, bucket = make_scanner()
     scanner.config.defaults.filelist_depth = 3
     partial_errors = PartialErrorSummary()
@@ -518,32 +520,35 @@ async def test_discover_root_prunes_partial_child_filelist_results_after_paginat
 
     discovery = await scanner._discover_root(application, bucket, client, partial_errors=partial_errors)
 
-    assert discovery.prefixes == ["bravo/"]
-    assert discovery.metadata_files == []
+    assert discovery.prefixes == ["alpha/", "bravo/"]
+    assert "alpha/page-one.txt" not in discovery.metadata_files
     manifest = partial_errors.to_manifest()
     assert manifest["filelist_failed_dirs"] == 1
     assert manifest["samples"][0]["target"] == "/alpha/"
     requested_paths = [decode_request_body(call)["path"] for call in client.calls]
     assert "/alpha/" in requested_paths
     assert "/bravo/" in requested_paths
-    assert "/alpha/child/" not in requested_paths
+    assert "/alpha/child/" in requested_paths
     assert "/bravo/child/" in requested_paths
 
 
 @pytest.mark.asyncio
-async def test_discover_root_propagates_root_filelist_failure():
+async def test_discover_root_records_root_request_failure_and_returns_empty_discovery():
     scanner, application, bucket = make_scanner()
     partial_errors = PartialErrorSummary()
 
-    with pytest.raises(RuntimeError, match="root filelist failed"):
-        await scanner._discover_root(
-            application,
-            bucket,
-            FailingRootFilelistClient(),
-            partial_errors=partial_errors,
-        )
+    discovery = await scanner._discover_root(
+        application,
+        bucket,
+        FailingRootFilelistClient(),
+        partial_errors=partial_errors,
+    )
 
-    assert not partial_errors.has_errors()
+    assert discovery.prefixes == []
+    assert discovery.metadata_files == []
+    assert partial_errors.filelist_failed_dirs == 1
+    assert partial_errors.errors[0].scope == "directory"
+    assert partial_errors.errors[0].scope_value == "/"
 
 
 @pytest.mark.asyncio
@@ -910,7 +915,7 @@ async def test_discover_root_progress_logs_do_not_include_request_urls(caplog: p
 
 
 @pytest.mark.asyncio
-async def test_discover_root_sanitizes_child_filelist_failure_logs(caplog: pytest.LogCaptureFixture):
+async def test_discover_root_logs_raw_request_failure_reason(caplog: pytest.LogCaptureFixture):
     scanner, application, bucket = make_scanner()
     partial_errors = PartialErrorSummary()
     client = PaginatedFailingChildFilelistClient()
@@ -920,11 +925,9 @@ async def test_discover_root_sanitizes_child_filelist_failure_logs(caplog: pytes
 
     messages = [record.getMessage() for record in caplog.records]
     assert any("filelist directory failure appid=app.one bucket=bucket-name-1 path=/alpha/" in message for message in messages)
-    assert all("https://obs.example/private/path" not in message for message in messages)
-    assert all("secret-token" not in message for message in messages)
-    assert all("abc123" not in message for message in messages)
-    assert all("token=" not in message for message in messages)
-    assert all("access_token=" not in message for message in messages)
+    assert any("https://obs.example/private/path" in message for message in messages)
+    assert any("token=secret-token" in message for message in messages)
+    assert any("access_token=abc123" in message for message in messages)
 
 
 @pytest.mark.asyncio
@@ -1032,6 +1035,37 @@ async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_fail
 
 
 @pytest.mark.asyncio
+async def test_run_keeps_other_applications_after_listbuckets_request_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, bad_application, _ = make_scanner()
+    good_application = ApplicationConfig(
+        appid="app.good",
+        name="Good App",
+        endpoint="http://good-obs.example",
+        apptoken="token-2",
+    )
+    scanner.config.applications = [bad_application, good_application]
+    scanner.config.scan.results_dir = str(tmp_path)
+
+    async def fake_list_buckets(application: ApplicationConfig, client: Any) -> list[BucketInfo]:
+        del client
+        if application.appid == "app.one":
+            raise detailed_request_error("listbuckets", "list buckets unavailable")
+        return []
+
+    monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+
+    manifest = await scanner.run(run_id="run-1")
+
+    assert manifest["status"] == "partial_failed"
+    assert manifest["applications"][0]["status"] == "failed"
+    assert manifest["applications"][0]["buckets"] == []
+    assert manifest["applications"][1]["status"] == "success"
+
+
+@pytest.mark.asyncio
 async def test_collect_metadata_files_uses_bucket_name_as_bucketid_and_writes_csv(tmp_path: Path):
     scanner, application, bucket = make_scanner()
     client = FakeClient([{"result": {"objectKey": {"objectKey": "root.txt", "size": "12", "lastModifyTime": "1000"}}}])
@@ -1085,7 +1119,8 @@ class MetadataPartialFailureClient:
         self.calls.append({"url": url, "params": params, "headers": headers})
         object_key = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
         if object_key == "bad.txt":
-            raise RuntimeError(
+            raise detailed_request_error(
+                "metadata",
                 "metadata unavailable for https://obs.example/private/path?token=secret-token&access_token=abc123"
             )
         return {
@@ -1107,7 +1142,7 @@ class ObjectkeysPartialFailureClient:
         self.calls.append({"url": url, "params": params, "headers": headers})
         prefix = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
         if prefix == "bad/":
-            raise RuntimeError("objectkeys unavailable")
+            raise detailed_request_error("objectkeys", "objectkeys unavailable")
         return {
             "result": {
                 "objectkeys": [
@@ -1116,6 +1151,46 @@ class ObjectkeysPartialFailureClient:
                 "truncated": "false",
             }
         }
+
+
+class UnexpectedMetadataClient:
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        raise RuntimeError("metadata parser bug")
+
+
+class UnexpectedObjectkeysClient:
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        raise RuntimeError("objectkeys parser bug")
+
+
+@pytest.mark.asyncio
+async def test_metadata_unexpected_exception_propagates(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    with pytest.raises(RuntimeError, match="metadata parser bug"):
+        await scanner._collect_metadata_files(
+            application,
+            bucket,
+            "http://bucket-endpoint",
+            ["bad.txt"],
+            tmp_path,
+            UnexpectedMetadataClient(),
+            partial_errors=PartialErrorSummary(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_objectkeys_unexpected_exception_propagates(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    with pytest.raises(RuntimeError, match="objectkeys parser bug"):
+        await scanner._collect_prefixes(
+            application,
+            bucket,
+            "http://bucket-endpoint",
+            ["bad/"],
+            tmp_path,
+            UnexpectedObjectkeysClient(),
+            partial_errors=PartialErrorSummary(),
+        )
 
 
 @pytest.mark.asyncio
@@ -1316,7 +1391,7 @@ class PartialBucketScanClient:
         if endpoint == "objectkeys":
             prefix = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
             if prefix == "bad/":
-                raise RuntimeError("prefix boom")
+                raise detailed_request_error("objectkeys", "prefix boom")
             return {
                 "result": {
                     "objectkeys": [{"objectKey": "good/file.txt", "size": "5", "lastModifyTime": "2000"}],
@@ -1341,11 +1416,73 @@ async def test_scan_bucket_returns_partial_failed_with_csv_for_objectkeys_failur
     )
 
     assert result.status == ScanStatus.PARTIAL_FAILED
-    assert result.error is None
+    assert result.error == "1 request failures; objectkeys=1; first: objectkeys prefix=bad/ status=503 reason=prefix boom"
     assert result.csv_path == tmp_path / application.appid / f"{bucket.name}.csv"
     assert result.csv_path.exists()
     assert result.partial_errors is not None
     assert result.partial_errors.to_manifest()["objectkeys_failed_prefixes"] == 1
+
+
+class FailingBucketEndpointClient:
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        raise detailed_request_error("bucket_endpoint", "endpoint unavailable")
+
+
+@pytest.mark.asyncio
+async def test_scan_bucket_endpoint_request_failure_has_detail_and_timing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, application, bucket = make_scanner()
+    wall_times = iter([2_000, 5_000])
+    monotonic_times = iter([20.0, 21.5])
+    monkeypatch.setattr("obs_scan_platform.scanner._now_ms", lambda: next(wall_times))
+    monkeypatch.setattr("obs_scan_platform.scanner.time", SimpleNamespace(monotonic=lambda: next(monotonic_times)))
+
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        FailingBucketEndpointClient(),
+        "run-1",
+        tmp_path,
+        scan_started_ms=500,
+    )
+
+    assert result.status == ScanStatus.FAILED
+    assert result.csv_path is None
+    assert "endpoint unavailable" in result.error
+    assert len(result.errors) == 1
+    assert result.errors[0].scope == "bucket"
+    assert result.errors[0].scope_value == bucket.name
+    assert result.started_ms == 2_000
+    assert result.ended_ms == 5_000
+    assert result.started_at == "1970-01-01T00:00:02.000Z"
+    assert result.ended_at == "1970-01-01T00:00:05.000Z"
+    assert result.elapsed_seconds == 1.5
+
+
+@pytest.mark.asyncio
+async def test_bucket_result_records_start_end_and_elapsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    scanner, application, bucket = make_scanner()
+    wall_times = iter([1_000, 4_000])
+    monotonic_times = iter([10.0, 13.25])
+    monkeypatch.setattr("obs_scan_platform.scanner._now_ms", lambda: next(wall_times))
+    monkeypatch.setattr("obs_scan_platform.scanner.time", SimpleNamespace(monotonic=lambda: next(monotonic_times)))
+
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        FakeClient([{"result": "http://bucket-endpoint/"}, {"result": {"files": [], "nextOffset": ""}}]),
+        "run-1",
+        tmp_path,
+        scan_started_ms=500,
+    )
+
+    assert result.started_ms == 1_000
+    assert result.ended_ms == 4_000
+    assert result.started_at == "1970-01-01T00:00:01.000Z"
+    assert result.ended_at == "1970-01-01T00:00:04.000Z"
+    assert result.elapsed_seconds == 3.25
 
 
 @pytest.mark.asyncio
@@ -1518,13 +1655,27 @@ def test_bucket_manifest_includes_partial_errors_and_keeps_error_empty(tmp_path:
         status=ScanStatus.PARTIAL_FAILED,
         csv_path=tmp_path / "bucket.csv",
         thresholds=scanner.config.defaults,
+        error=partial_errors.summary_text(),
         partial_errors=partial_errors,
+        errors=list(partial_errors.errors),
+        started_ms=1_000,
+        ended_ms=4_000,
+        started_at="1970-01-01T00:00:01.000Z",
+        ended_at="1970-01-01T00:00:04.000Z",
+        elapsed_seconds=3.0,
     )
 
     manifest = scanner._bucket_result_to_manifest(result, tmp_path / "missing-temp")
 
     assert manifest["status"] == "partial_failed"
-    assert manifest["error"] is None
+    assert manifest["error"] == "1 request failures; objectkeys=1; first: objectkeys target=alpha/ status=503 reason=busy"
+    assert manifest["errors"][0]["scope"] == "target"
+    assert manifest["errors"][0]["scope_value"] == "alpha/"
+    assert manifest["started_ms"] == 1_000
+    assert manifest["ended_ms"] == 4_000
+    assert manifest["started_at"] == "1970-01-01T00:00:01.000Z"
+    assert manifest["ended_at"] == "1970-01-01T00:00:04.000Z"
+    assert manifest["elapsed_seconds"] == 3.0
     assert manifest["partial_errors"] == {
         "filelist_failed_dirs": 0,
         "metadata_failed_files": 0,

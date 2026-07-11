@@ -19,11 +19,12 @@ from obs_scan_platform.models import (
     BucketScanResult,
     ObjectRow,
     PartialErrorSummary,
+    RequestFailureDetail,
     RootDiscovery,
     ScanStatus,
     _sanitize_reason,
 )
-from obs_scan_platform.obs_client import OBSClient, encode_object_key, encode_request_body
+from obs_scan_platform.obs_client import OBSClient, OBSRequestError, encode_object_key, encode_request_body
 from obs_scan_platform.paths import prefix_temp_filename
 
 
@@ -58,6 +59,11 @@ def should_scan_bucket(bucket: BucketInfo, include_shared: bool) -> bool:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _iso_utc(timestamp_ms: int) -> str:
+    value = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+    return value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _default_run_id() -> str:
@@ -196,6 +202,8 @@ class Scanner:
 
                 async def scan_bucket_with_limit(bucket: BucketInfo) -> BucketScanResult:
                     async with bucket_semaphore:
+                        started_ms = _now_ms()
+                        started_monotonic = time.monotonic()
                         try:
                             return await self._scan_bucket(
                                 application,
@@ -206,6 +214,8 @@ class Scanner:
                                 scan_started_ms,
                             )
                         except Exception as exc:
+                            ended_ms = _now_ms()
+                            elapsed_seconds = time.monotonic() - started_monotonic
                             LOGGER.exception(
                                 "bucket failure appid=%s bucket=%s error=unexpected_exception",
                                 application.appid,
@@ -219,6 +229,11 @@ class Scanner:
                                 csv_path=None,
                                 thresholds=self.config.thresholds_for(application, bucket.name),
                                 error=str(exc),
+                                started_ms=started_ms,
+                                ended_ms=ended_ms,
+                                started_at=_iso_utc(started_ms),
+                                ended_at=_iso_utc(ended_ms),
+                                elapsed_seconds=elapsed_seconds,
                             )
 
                 bucket_results = await asyncio.gather(*(scan_bucket_with_limit(bucket) for bucket in buckets))
@@ -286,6 +301,7 @@ class Scanner:
         results_dir: Path,
         scan_started_ms: int,
     ) -> BucketScanResult:
+        started_ms = _now_ms()
         bucket_started = time.monotonic()
         LOGGER.info("bucket start appid=%s bucket=%s", application.appid, bucket.name)
         thresholds = self.config.thresholds_for(application, bucket.name)
@@ -329,7 +345,8 @@ class Scanner:
                 thresholds=thresholds,
                 scan_started_ms=scan_started_ms,
             )
-        except Exception as exc:
+        except OBSRequestError as exc:
+            ended_ms = _now_ms()
             elapsed_seconds = time.monotonic() - bucket_started
             LOGGER.exception(
                 "bucket failure appid=%s bucket=%s elapsed_seconds=%.3f",
@@ -346,8 +363,43 @@ class Scanner:
                 thresholds=thresholds,
                 error=str(exc),
                 partial_errors=partial_errors if partial_errors.has_errors() else None,
+                errors=[
+                    *partial_errors.errors,
+                    RequestFailureDetail.from_error(exc, scope="bucket", scope_value=bucket.name),
+                ],
+                started_ms=started_ms,
+                ended_ms=ended_ms,
+                started_at=_iso_utc(started_ms),
+                ended_at=_iso_utc(ended_ms),
+                elapsed_seconds=elapsed_seconds,
+            )
+        except Exception as exc:
+            ended_ms = _now_ms()
+            elapsed_seconds = time.monotonic() - bucket_started
+            LOGGER.exception(
+                "bucket failure appid=%s bucket=%s elapsed_seconds=%.3f",
+                application.appid,
+                bucket.name,
+                elapsed_seconds,
+            )
+            return BucketScanResult(
+                appid=application.appid,
+                bucket_name=bucket.name,
+                bucket_id=bucket.bucket_id,
+                status=ScanStatus.FAILED,
+                csv_path=None,
+                thresholds=thresholds,
+                error=str(exc),
+                partial_errors=partial_errors if partial_errors.has_errors() else None,
+                errors=list(partial_errors.errors),
+                started_ms=started_ms,
+                ended_ms=ended_ms,
+                started_at=_iso_utc(started_ms),
+                ended_at=_iso_utc(ended_ms),
+                elapsed_seconds=elapsed_seconds,
             )
 
+        ended_ms = _now_ms()
         elapsed_seconds = time.monotonic() - bucket_started
         status = ScanStatus.PARTIAL_FAILED if partial_errors.has_errors() else ScanStatus.SUCCESS
         LOGGER.info(
@@ -364,7 +416,14 @@ class Scanner:
             status=status,
             csv_path=output_path,
             thresholds=thresholds,
+            error=partial_errors.summary_text(),
             partial_errors=partial_errors if partial_errors.has_errors() else None,
+            errors=list(partial_errors.errors),
+            started_ms=started_ms,
+            ended_ms=ended_ms,
+            started_at=_iso_utc(started_ms),
+            ended_at=_iso_utc(ended_ms),
+            elapsed_seconds=elapsed_seconds,
         )
 
     async def _get_bucket_endpoint(
@@ -492,19 +551,16 @@ class Scanner:
                 if not next_pointer or next_pointer == pointer:
                     break
                 pointer = next_pointer
-        except Exception as exc:
-            if path == "/":
-                raise
-            scheduler.rollback_failed_task(task)
+        except OBSRequestError as exc:
             if partial_errors is not None:
-                partial_errors.record("filelist", path, exc)
-            sanitized_error = _sanitize_reason(str(exc))
+                partial_errors.record("filelist", path, exc, scope="directory")
             LOGGER.warning(
-                "filelist directory failure appid=%s bucket=%s path=%s error=%s",
+                "filelist directory failure appid=%s bucket=%s path=%s status=%s reason=%s",
                 application.appid,
                 bucket.name,
                 path,
-                sanitized_error,
+                "unknown" if exc.status_code is None else exc.status_code,
+                exc.reason,
             )
         finally:
             scheduler.mark_completed(task)
@@ -581,9 +637,9 @@ class Scanner:
                     row = self._metadata_to_object_row(object_key, data)
                     if row is not None:
                         rows.append(row)
-                except Exception as exc:
+                except OBSRequestError as exc:
                     if partial_errors is not None:
-                        partial_errors.record("metadata", object_key, exc)
+                        partial_errors.record("metadata", object_key, exc, scope="object_key")
                     sanitized_error = _sanitize_reason(str(exc))
                     LOGGER.warning(
                         "metadata object failure appid=%s bucket=%s object_key=%s error=%s",
@@ -634,10 +690,10 @@ class Scanner:
                     return
                 try:
                     await self._collect_prefix(application, bucket, endpoint, prefix, temp_dir, client)
-                except Exception as exc:
+                except OBSRequestError as exc:
                     failed += 1
                     if partial_errors is not None:
-                        partial_errors.record("objectkeys", prefix, exc)
+                        partial_errors.record("objectkeys", prefix, exc, scope="prefix")
                     sanitized_error = _sanitize_reason(str(exc))
                     LOGGER.warning(
                         "objectkeys prefix failure appid=%s bucket=%s prefix=%s error=%s",
@@ -756,6 +812,12 @@ class Scanner:
             "csv_path": str(result.csv_path) if result.csv_path is not None else None,
             "thresholds": result.thresholds.model_dump(mode="json"),
             "error": result.error,
+            "errors": [error.to_manifest() for error in result.errors],
+            "started_ms": result.started_ms,
+            "ended_ms": result.ended_ms,
+            "started_at": result.started_at,
+            "ended_at": result.ended_at,
+            "elapsed_seconds": result.elapsed_seconds,
         }
         if result.partial_errors is not None and result.partial_errors.has_errors():
             manifest["partial_errors"] = result.partial_errors.to_manifest()
