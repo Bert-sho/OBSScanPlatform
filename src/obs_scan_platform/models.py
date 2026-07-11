@@ -167,15 +167,27 @@ class ObjectkeysProgress:
     pages: int = 0
     objects: int = 0
 
+    def __post_init__(self) -> None:
+        if min(self.total, self.completed, self.succeeded, self.failed, self.pages, self.objects) < 0:
+            raise ValueError("objectkeys progress values must be non-negative")
+        if self.succeeded + self.failed != self.completed or self.completed > self.total:
+            raise ValueError("objectkeys progress must satisfy succeeded + failed == completed <= total")
+
     def record_page(self, object_count: int) -> None:
+        if object_count < 0:
+            raise ValueError("object_count must be non-negative")
         self.pages += 1
         self.objects += object_count
 
     def record_success(self) -> None:
+        if self.completed >= self.total:
+            raise ValueError("objectkeys progress cannot exceed total")
         self.succeeded += 1
         self.completed += 1
 
     def record_failure(self) -> None:
+        if self.completed >= self.total:
+            raise ValueError("objectkeys progress cannot exceed total")
         self.failed += 1
         self.completed += 1
 

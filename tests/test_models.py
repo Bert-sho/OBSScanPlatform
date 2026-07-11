@@ -1,3 +1,5 @@
+import pytest
+
 from obs_scan_platform.config import Thresholds
 from obs_scan_platform.models import (
     DirectoryStats,
@@ -97,3 +99,38 @@ def test_objectkeys_progress_tracks_pages_objects_and_prefix_outcomes():
     assert progress.pages == 2
     assert progress.objects == 6
     assert progress.succeeded + progress.failed == progress.completed <= progress.total
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"total": 1, "completed": 1, "succeeded": 0, "failed": 0},
+        {"total": 1, "completed": 2, "succeeded": 1, "failed": 1},
+    ],
+)
+def test_objectkeys_progress_rejects_invalid_initial_state(kwargs):
+    with pytest.raises(ValueError):
+        ObjectkeysProgress(**kwargs)
+
+
+def test_objectkeys_progress_rejects_zero_total_and_over_completion():
+    zero_progress = ObjectkeysProgress(total=0)
+    with pytest.raises(ValueError):
+        zero_progress.record_success()
+    with pytest.raises(ValueError):
+        zero_progress.record_failure()
+
+    full_progress = ObjectkeysProgress(total=1)
+    full_progress.record_success()
+    with pytest.raises(ValueError):
+        full_progress.record_failure()
+
+
+def test_objectkeys_progress_rejects_negative_page_object_count():
+    progress = ObjectkeysProgress(total=1)
+
+    with pytest.raises(ValueError):
+        progress.record_page(-1)
+
+    assert progress.pages == 0
+    assert progress.objects == 0
