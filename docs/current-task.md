@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Design the next OBS request diagnostics, fallback, manifest, timing, and progress revision
+Plan the next OBS request diagnostics, fallback, manifest, timing, and progress revision
 
 ## Current branch
 
@@ -10,43 +10,40 @@ Design the next OBS request diagnostics, fallback, manifest, timing, and progres
 
 ## Task status
 
-`wip`
+`completed`
 
 ## User goal
 
-Build on the first endpoint-fallback implementation already present on the shared branch: keep successful request URLs quiet, log unredacted details for failed attempts, refine all five endpoint policies, produce partial CSVs, add detailed per-bucket manifest errors and timing, and expand per-bucket objectkeys progress.
+Continue from the approved 2026-07-12 design and create an executable, test-driven delta plan against the first-version fallback implementation already present on the shared branch.
 
 ## Completed work
 
-- Diagnosed the original successful-request URL logging and bucket-level fail-fast causes.
-- Fetched and reviewed 16 newer shared-branch commits before integrating documentation.
-- Confirmed the shared branch already contains first-version endpoint fallback, partial bucket status, and basic objectkeys prefix progress.
-- Identified the approved delta from that baseline: unredacted failure diagnostics, 2048-character bodies, three retries, recoverable root filelist failure, full `errors`, partial-bucket `error` summaries, timing, and richer progress counters.
-- Completed the Superpowers brainstorming dialogue with explicit user decisions.
-- Defined transport-level structured request failures and scanner-level endpoint semantics.
-- Defined backward-compatible manifest behavior that retains both `error` and existing `partial_errors` while adding detailed `errors`.
-- Defined objectkeys `succeeded`, `failed`, `pages`, and `objects` counters.
-- Wrote and self-reviewed the approved incremental design specification.
+- Confirmed the written design was approved for planning.
+- Read the Superpowers writing-plans workflow and mapped current runtime and test files.
+- Preserved the shared-branch baseline rather than planning duplicate first-version work.
+- Split execution into five independently reviewable tasks: request diagnostics, models, fallback/timing, objectkeys progress, and integration/handoff.
+- Specified exact interfaces, failing tests, minimal implementation contracts, validation commands, expected outcomes, and commit boundaries.
+- Clarified in the design that successful filelist pages must not be rolled back after a later page failure.
+- Wrote the implementation plan at `docs/superpowers/plans/2026-07-12-obs-request-fallback-and-progress.md`.
 
 ## Remaining work
 
-- User review of the committed written specification.
-- After explicit approval, invoke `superpowers:writing-plans` against the current shared-branch implementation.
-- Implement only after the plan is written and reviewed.
-- Re-run the full suite on macOS during implementation; the previous Windows run had six documented platform-specific failures.
+- Choose an execution mode: subagent-driven development or inline executing-plans.
+- Execute the plan using TDD.
+- Run targeted and full macOS validation.
+- Update final task/handoff state, commit, and push implementation changes.
 
 ## Key files changed
 
+- `docs/superpowers/plans/2026-07-12-obs-request-fallback-and-progress.md`
 - `docs/superpowers/specs/2026-07-12-obs-request-fallback-and-progress-design.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
-- `git fetch origin`
-- `git log --oneline --left-right --cherry-pick HEAD...origin/codex/obs-scan-platform`
-- `git diff --stat HEAD..origin/codex/obs-scan-platform`
-- `rg -n "TBD|TODO|FIXME|placeholder" docs/superpowers/specs/2026-07-12-obs-request-fallback-and-progress-design.md`
+- `rg -n "TBD|TODO|implement later|fill in details|similar to task" docs/superpowers/plans/2026-07-12-obs-request-fallback-and-progress.md`
+- `rg -n "OBSRequestError|PartialErrorSummary|ObjectkeysProgress|BucketScanResult" docs/superpowers/plans/2026-07-12-obs-request-fallback-and-progress.md`
 - `git diff --check`
 - `git status`
 - `git diff --stat`
@@ -54,19 +51,18 @@ Build on the first endpoint-fallback implementation already present on the share
 
 ## Validation result
 
-- The design was rebased onto shared-branch commit `5930bee` rather than overwriting newer implementation work.
-- Documentation self-review passed for placeholders, contradictions, ambiguity, compatibility, and scope.
-- Git whitespace validation passed.
-- No implementation tests were run because this task changes design documentation only.
-- Shared-branch baseline from Windows: focused scanner suite `69 passed`; full suite `116 passed, 6 failed, 1 warning`, with all six failures documented as platform/test-environment assumptions.
+- Plan covers every approved design requirement and preserves existing compatibility exceptions.
+- Type names and task-to-task interfaces were checked for consistency.
+- Placeholder and whitespace checks passed.
+- No implementation tests were run because this task changes planning documentation only.
 
 ## Known risks
 
-- Failure logs and manifests intentionally retain tokens and other sensitive URL/body data by explicit user decision; output files require sensitive-data handling.
-- Partial CSVs are intentionally incomplete and must be interpreted together with bucket status, `error`, `partial_errors`, and `errors`.
-- The implementation must distinguish recoverable `OBSRequestError` from programming and filesystem exceptions instead of catching every `Exception` as partial failure.
-- Root filelist failure changes from the current shared-branch hard-failure behavior to the newly approved partial-failure behavior.
+- Failure logs and detailed manifest errors intentionally retain sensitive URL/body data.
+- Existing first-version tests assert sanitization and root hard failure; implementation must intentionally replace those expectations rather than layering contradictory behavior on top.
+- The plan removes filelist rollback because the approved behavior preserves successful earlier pages; regression tests must prove coverage remains non-duplicated.
+- Full macOS validation is required because the prior shared-branch full suite was red only on a Windows environment.
 
 ## Next recommended action
 
-Review the committed design specification. After explicit approval, use `superpowers:writing-plans` to create a delta plan against the current shared-branch implementation.
+Choose the plan execution mode. Subagent-driven development is recommended for independent review after each task; inline execution is available for checkpointed work in this session.

@@ -138,6 +138,7 @@ All HTTP errors, exhausted transient errors, `success=false` responses, and JSON
 
 - Recoverable final failures do not skip aggregation.
 - Successfully collected rows remain in temporary CSV files and are included in the final bucket CSV.
+- Successful filelist pages remain in the scheduler after a later page failure; do not roll back already discovered folders, queued descendants, or direct files from those pages.
 - A bucket with recoverable failures but no valid rows still produces a header-only CSV.
 - Such a bucket is always `partial_failed`, even if every recoverable request failed.
 - A `bucket_endpoint` hard failure produces no bucket CSV.
