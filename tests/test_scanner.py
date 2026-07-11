@@ -1429,12 +1429,26 @@ def test_bucket_manifest_temp_dir_cleanup_and_retention(tmp_path: Path):
     assert manifest["temp_dir"] == str(failed_keep_dir)
 
 
+def detailed_request_error(endpoint: str, reason: str) -> OBSRequestError:
+    return OBSRequestError(
+        endpoint=endpoint,
+        status_code=503,
+        reason=reason,
+        url="https://obs.example/test?token=raw-token",
+        response_body='{"success":false,"msg":"busy"}',
+        response_body_truncated=False,
+        response_body_original_chars=30,
+        exception_type="OBSBusinessError",
+        attempts=4,
+    )
+
+
 def test_partial_error_summary_counts_and_caps_samples():
     summary = PartialErrorSummary(sample_limit=2)
 
-    summary.record("filelist", "/alpha/", "first failure")
-    summary.record("metadata", "root.txt", "second failure")
-    summary.record("objectkeys", "logs/", "third failure")
+    summary.record("filelist", "/alpha/", detailed_request_error("filelist", "first failure"))
+    summary.record("metadata", "root.txt", detailed_request_error("metadata", "second failure"))
+    summary.record("objectkeys", "logs/", detailed_request_error("objectkeys", "third failure"))
 
     assert summary.has_errors()
     assert summary.to_manifest() == {
@@ -1445,17 +1459,20 @@ def test_partial_error_summary_counts_and_caps_samples():
             {
                 "endpoint": "filelist",
                 "target": "/alpha/",
-                "status": None,
+                "status": 503,
                 "reason": "first failure",
             },
             {
                 "endpoint": "metadata",
                 "target": "root.txt",
-                "status": None,
+                "status": 503,
                 "reason": "second failure",
             },
         ],
     }
+    assert len(summary.errors) == 3
+    assert summary.errors[2].url == "https://obs.example/test?token=raw-token"
+    assert summary.errors[2].response_body == '{"success":false,"msg":"busy"}'
 
 
 def test_partial_error_summary_redacts_urls_and_credential_query_text():
@@ -1464,16 +1481,18 @@ def test_partial_error_summary_redacts_urls_and_credential_query_text():
     summary.record(
         "metadata",
         "root.txt",
-        OBSRequestError(
-            endpoint="metadata",
-            status_code=503,
-            reason="upstream failed for https://obs.example/path?token=secret-token&user=alice",
+        detailed_request_error(
+            "metadata",
+            "upstream failed for https://obs.example/path?token=secret-token&user=alice",
         ),
     )
     summary.record(
         "objectkeys",
         "logs/",
-        "download failed for http://obs.example/archive?access_token=abc123&bucket=demo",
+        detailed_request_error(
+            "objectkeys",
+            "download failed for http://obs.example/archive?access_token=abc123&bucket=demo",
+        ),
     )
 
     samples = summary.to_manifest()["samples"]
@@ -1484,12 +1503,14 @@ def test_partial_error_summary_redacts_urls_and_credential_query_text():
     assert all("abc123" not in sample["reason"] for sample in samples)
     assert all("token=" not in sample["reason"] for sample in samples)
     assert all("access_token=" not in sample["reason"] for sample in samples)
+    assert summary.errors[0].url == "https://obs.example/test?token=raw-token"
+    assert summary.errors[0].response_body == '{"success":false,"msg":"busy"}'
 
 
 def test_bucket_manifest_includes_partial_errors_and_keeps_error_empty(tmp_path: Path):
     scanner, _, bucket = make_scanner()
     partial_errors = PartialErrorSummary()
-    partial_errors.record("objectkeys", "alpha/", "busy")
+    partial_errors.record("objectkeys", "alpha/", detailed_request_error("objectkeys", "busy"))
     result = BucketScanResult(
         appid="app.one",
         bucket_name=bucket.name,
@@ -1512,7 +1533,7 @@ def test_bucket_manifest_includes_partial_errors_and_keeps_error_empty(tmp_path:
             {
                 "endpoint": "objectkeys",
                 "target": "alpha/",
-                "status": None,
+                "status": 503,
                 "reason": "busy",
             }
         ],
