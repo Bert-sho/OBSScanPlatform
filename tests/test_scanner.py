@@ -204,6 +204,10 @@ class DummyProgressBar:
         self.updates: list[int] = []
         self.refreshes = 0
         self.closed = False
+        self.postfixes: list[dict[str, int]] = []
+
+    def set_postfix(self, values: dict[str, int], *, refresh: bool = False) -> None:
+        self.postfixes.append(dict(values))
 
     def update(self, count: int) -> None:
         self.updates.append(count)
@@ -1195,6 +1199,33 @@ class ObjectkeysPartialFailureClient:
         }
 
 
+class ObjectkeysPaginatedPartialFailureClient:
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        prefix = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
+        marker = params["nextmarker"]
+        if prefix == "partial/" and marker == "page-2":
+            raise detailed_request_error("objectkeys", "objectkeys page unavailable")
+        if prefix == "partial/":
+            return {
+                "result": {
+                    "objectkeys": [
+                        {"objectKey": "partial/one.txt", "size": "1", "lastModifyTime": "2000"},
+                        {"objectKey": "partial/two.txt", "size": "2", "lastModifyTime": "2000"},
+                    ],
+                    "truncated": "true",
+                    "nextmarker": "page-2",
+                }
+            }
+        return {
+            "result": {
+                "objectkeys": [
+                    {"objectKey": "good/file.txt", "size": "3", "lastModifyTime": "2000"},
+                ],
+                "truncated": "false",
+            }
+        }
+
+
 class UnexpectedMetadataClient:
     async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
         raise RuntimeError("metadata parser bug")
@@ -1392,7 +1423,11 @@ async def test_collect_prefixes_records_prefix_failure_and_keeps_other_prefixes(
     messages = [record.getMessage() for record in caplog.records]
     assert any("objectkeys start appid=app.one bucket=bucket-name-1 total=3" in message for message in messages)
     assert any("objectkeys prefix failure appid=app.one bucket=bucket-name-1 prefix=bad/" in message for message in messages)
-    assert any("objectkeys finish appid=app.one bucket=bucket-name-1 completed=3 total=3 failed=1" in message for message in messages)
+    assert any(
+        "objectkeys finish appid=app.one bucket=bucket-name-1 "
+        "completed=3 total=3 succeeded=2 failed=1 pages=2 objects=2" in message
+        for message in messages
+    )
     assert all("http://bucket-endpoint" not in message for message in messages)
 
 
@@ -1421,7 +1456,44 @@ async def test_collect_prefixes_updates_objectkeys_progress_for_success_and_fail
 
     assert progress_bar.total == 2
     assert progress_bar.updates == [1, 1]
+    assert progress_bar.postfixes[-1] == {
+        "succeeded": 1,
+        "failed": 1,
+        "pages": 1,
+        "objects": 1,
+    }
     assert progress_bar.closed
+
+
+@pytest.mark.asyncio
+async def test_objectkeys_progress_keeps_successful_pages_from_failed_prefix(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    scanner, application, bucket = make_scanner()
+    scanner.config.scan.objectkeys_concurrency_per_bucket = 1
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        await scanner._collect_prefixes(
+            application,
+            bucket,
+            "http://bucket-endpoint",
+            ["partial/", "good/"],
+            tmp_path,
+            ObjectkeysPaginatedPartialFailureClient(),
+            partial_errors=PartialErrorSummary(),
+        )
+
+    rows = []
+    for prefix in ("partial/", "good/"):
+        rows.extend(csv.DictReader((tmp_path / prefix_temp_filename(prefix)).open(newline="", encoding="utf-8")))
+    assert sorted(row["object_key"] for row in rows) == ["good/file.txt", "partial/one.txt", "partial/two.txt"]
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "objectkeys finish appid=app.one bucket=bucket-name-1 "
+        "completed=2 total=2 succeeded=1 failed=1 pages=2 objects=3" in message
+        for message in messages
+    )
 
 
 @pytest.mark.asyncio

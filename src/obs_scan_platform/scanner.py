@@ -18,6 +18,7 @@ from obs_scan_platform.models import (
     BucketInfo,
     BucketScanResult,
     ObjectRow,
+    ObjectkeysProgress,
     PartialErrorSummary,
     RequestFailureDetail,
     RootDiscovery,
@@ -683,8 +684,7 @@ class Scanner:
         if total == 0:
             LOGGER.info("objectkeys skipped appid=%s bucket=%s total=0", application.appid, bucket.name)
             return
-        completed = 0
-        failed = 0
+        progress = ObjectkeysProgress(total=total)
         progress_bar = self._objectkeys_progress_bar(application, bucket, total)
         if progress_bar is not None:
             progress_bar.total = total
@@ -694,38 +694,52 @@ class Scanner:
             queue.put_nowait(prefix)
 
         async def worker() -> None:
-            nonlocal completed, failed
             while True:
                 try:
                     prefix = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     return
                 try:
-                    await self._collect_prefix(application, bucket, endpoint, prefix, temp_dir, client)
-                except OBSRequestError as exc:
-                    failed += 1
-                    if partial_errors is not None:
-                        partial_errors.record("objectkeys", prefix, exc, scope="prefix")
-                    sanitized_error = _sanitize_reason(str(exc))
-                    LOGGER.warning(
-                        "objectkeys prefix failure appid=%s bucket=%s prefix=%s error=%s",
-                        application.appid,
-                        bucket.name,
-                        prefix,
-                        sanitized_error,
-                    )
-                finally:
-                    completed += 1
+                    try:
+                        await self._collect_prefix(application, bucket, endpoint, prefix, temp_dir, client, progress)
+                    except OBSRequestError as exc:
+                        if partial_errors is not None:
+                            partial_errors.record("objectkeys", prefix, exc, scope="prefix")
+                        sanitized_error = _sanitize_reason(str(exc))
+                        LOGGER.warning(
+                            "objectkeys prefix failure appid=%s bucket=%s prefix=%s error=%s",
+                            application.appid,
+                            bucket.name,
+                            prefix,
+                            sanitized_error,
+                        )
+                        progress.record_failure()
+                    else:
+                        progress.record_success()
                     LOGGER.info(
-                        "objectkeys progress appid=%s bucket=%s completed=%s total=%s failed=%s",
+                        "objectkeys progress appid=%s bucket=%s completed=%s total=%s "
+                        "succeeded=%s failed=%s pages=%s objects=%s",
                         application.appid,
                         bucket.name,
-                        completed,
-                        total,
-                        failed,
+                        progress.completed,
+                        progress.total,
+                        progress.succeeded,
+                        progress.failed,
+                        progress.pages,
+                        progress.objects,
                     )
                     if progress_bar is not None:
+                        progress_bar.set_postfix(
+                            {
+                                "succeeded": progress.succeeded,
+                                "failed": progress.failed,
+                                "pages": progress.pages,
+                                "objects": progress.objects,
+                            },
+                            refresh=False,
+                        )
                         progress_bar.update(1)
+                finally:
                     queue.task_done()
 
         try:
@@ -736,12 +750,16 @@ class Scanner:
             if progress_bar is not None:
                 progress_bar.close()
         LOGGER.info(
-            "objectkeys finish appid=%s bucket=%s completed=%s total=%s failed=%s",
+            "objectkeys finish appid=%s bucket=%s completed=%s total=%s "
+            "succeeded=%s failed=%s pages=%s objects=%s",
             application.appid,
             bucket.name,
-            completed,
-            total,
-            failed,
+            progress.completed,
+            progress.total,
+            progress.succeeded,
+            progress.failed,
+            progress.pages,
+            progress.objects,
         )
 
     async def _collect_prefix(
@@ -752,6 +770,7 @@ class Scanner:
         prefix: str,
         temp_dir: Path,
         client: OBSClient,
+        progress: ObjectkeysProgress | None = None,
     ) -> None:
         next_marker = ""
         url = _endpoint(endpoint, "/rest/boto3/s3/list/bucket/objectkeys")
@@ -781,6 +800,8 @@ class Scanner:
             ]
             if rows:
                 append_object_rows(temp_dir / prefix_temp_filename(prefix), rows)
+            if progress is not None:
+                progress.record_page(len(rows))
 
             truncated = payload.get("truncated") if isinstance(payload, dict) else None
             if str(truncated).lower() != "true":
