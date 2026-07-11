@@ -73,6 +73,7 @@ applications:
 
     assert config.scan.global_request_concurrency == 150
     assert config.scan.objectkeys_concurrency_limit() == 30
+    assert config.scan.max_retries == 3
 
 
 def test_legacy_per_bucket_prefix_concurrency_still_sets_objectkeys_limit(tmp_path: Path):

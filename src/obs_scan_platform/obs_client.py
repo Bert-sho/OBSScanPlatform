@@ -1,9 +1,13 @@
 import asyncio
 import base64
 import json
+import logging
 from typing import Any
 
 import httpx
+
+LOGGER = logging.getLogger(__name__)
+MAX_RESPONSE_BODY_CHARS = 2048
 
 
 class OBSRequestError(RuntimeError):
@@ -13,12 +17,55 @@ class OBSRequestError(RuntimeError):
         endpoint: str,
         status_code: int | None,
         reason: str,
+        url: str = "",
+        response_body: str = "<no response>",
+        response_body_truncated: bool = False,
+        response_body_original_chars: int = 0,
+        exception_type: str = "OBSRequestError",
+        attempts: int = 1,
     ) -> None:
         self.endpoint = endpoint
         self.status_code = status_code
         self.reason = reason
+        self.url = url
+        self.response_body = response_body
+        self.response_body_truncated = response_body_truncated
+        self.response_body_original_chars = response_body_original_chars
+        self.exception_type = exception_type
+        self.attempts = attempts
         status = "unknown" if status_code is None else str(status_code)
         super().__init__(f"OBS request failed endpoint={endpoint} status={status} reason={reason}")
+
+
+def _bounded_body(text: str) -> tuple[str, bool, int]:
+    original_chars = len(text)
+    return text[:MAX_RESPONSE_BODY_CHARS], original_chars > MAX_RESPONSE_BODY_CHARS, original_chars
+
+
+def _is_retryable(error: OBSRequestError) -> bool:
+    if error.status_code is None:
+        return True
+    if error.status_code in (408, 429) or error.status_code >= 500:
+        return True
+    return error.exception_type in {"OBSBusinessError", "InvalidJSON"}
+
+
+def _log_failed_attempt(error: OBSRequestError, max_attempts: int) -> None:
+    LOGGER.warning(
+        "OBS request attempt failed endpoint=%s attempt=%s max_attempts=%s status=%s "
+        "reason=%s url=%s response_body=%s response_body_truncated=%s "
+        "response_body_original_chars=%s exception_type=%s",
+        error.endpoint,
+        error.attempts,
+        max_attempts,
+        "unknown" if error.status_code is None else error.status_code,
+        error.reason,
+        error.url,
+        error.response_body,
+        str(error.response_body_truncated).lower(),
+        error.response_body_original_chars,
+        error.exception_type,
+    )
 
 
 def _response_reason(response: httpx.Response) -> str:
@@ -102,51 +149,85 @@ class OBSClient:
         headers: dict[str, str] | None = None,
         endpoint: str = "unknown",
     ) -> dict[str, Any]:
-        last_error: OBSRequestError | httpx.TimeoutException | httpx.ConnectError | None = None
-        for attempt in range(self.max_retries + 1):
+        max_attempts = self.max_retries + 1
+        for attempt_number in range(1, max_attempts + 1):
+            request = self.http.build_request("GET", url, params=params, headers=headers)
             try:
                 async with self.request_semaphore:
-                    response = await self.http.get(url, params=params, headers=headers)
+                    response = await self.http.send(request)
                 if response.status_code >= 400:
-                    error = OBSRequestError(
+                    body, truncated, original_chars = _bounded_body(response.text)
+                    raise OBSRequestError(
                         endpoint=endpoint,
                         status_code=response.status_code,
                         reason=_response_reason(response),
+                        url=str(request.url),
+                        response_body=body,
+                        response_body_truncated=truncated,
+                        response_body_original_chars=original_chars,
+                        exception_type="HTTPStatusError",
+                        attempts=attempt_number,
                     )
-                    raise error
-                data = response.json()
+                try:
+                    data = response.json()
+                except ValueError as exc:
+                    body, truncated, original_chars = _bounded_body(response.text)
+                    raise OBSRequestError(
+                        endpoint=endpoint,
+                        status_code=response.status_code,
+                        reason=f"Invalid JSON: {exc}",
+                        url=str(request.url),
+                        response_body=body,
+                        response_body_truncated=truncated,
+                        response_body_original_chars=original_chars,
+                        exception_type="InvalidJSON",
+                        attempts=attempt_number,
+                    ) from exc
                 success = data.get("success")
-                if success in (False, "false"):
+                if success is False or (isinstance(success, str) and success.lower() == "false"):
                     if not _has_failure_reason(data) and endpoint == "filelist" and _has_empty_filelist_objects(data):
                         return data
                     if not _has_failure_reason(data) and endpoint == "objectkeys" and _has_empty_objectkeys(data):
                         return data
+                    body, truncated, original_chars = _bounded_body(response.text)
                     raise OBSRequestError(
                         endpoint=endpoint,
                         status_code=response.status_code,
                         reason=_json_failure_reason(data),
+                        url=str(request.url),
+                        response_body=body,
+                        response_body_truncated=truncated,
+                        response_body_original_chars=original_chars,
+                        exception_type="OBSBusinessError",
+                        attempts=attempt_number,
                     )
                 return data
-            except OBSRequestError as exc:
-                last_error = exc
-                if exc.status_code is not None and 400 <= exc.status_code < 500:
+            except OBSRequestError as error:
+                _log_failed_attempt(error, max_attempts)
+                if not _is_retryable(error) or attempt_number == max_attempts:
                     raise
-                if attempt >= self.max_retries:
-                    break
-            except (httpx.TimeoutException, httpx.ConnectError) as exc:
-                last_error = exc
-                if attempt >= self.max_retries:
-                    break
+            except httpx.RequestError as exc:
+                error = OBSRequestError(
+                    endpoint=endpoint,
+                    status_code=None,
+                    reason=f"{exc.__class__.__name__}: {exc}",
+                    url=str(request.url),
+                    response_body="<no response>",
+                    response_body_truncated=False,
+                    response_body_original_chars=0,
+                    exception_type=exc.__class__.__name__,
+                    attempts=attempt_number,
+                )
+                _log_failed_attempt(error, max_attempts)
+                if attempt_number == max_attempts:
+                    raise error from exc
             delay = min(
                 self.retry_max_delay_seconds,
-                self.retry_base_delay_seconds * (2**attempt),
+                self.retry_base_delay_seconds * (2 ** (attempt_number - 1)),
             )
             if delay > 0:
                 await asyncio.sleep(delay)
-        if isinstance(last_error, OBSRequestError):
-            raise last_error
-        reason = last_error.__class__.__name__ if last_error is not None else "unknown"
-        raise OBSRequestError(endpoint=endpoint, status_code=None, reason=reason)
+        raise RuntimeError("unreachable")
 
     async def close(self) -> None:
         await self.http.aclose()
