@@ -2,109 +2,134 @@
 
 ## Timestamp
 
-2026-07-12 01:23:26 CST (Asia/Shanghai)
+2026-07-12 17:51:24 +08:00 (Asia/Shanghai)
 
 ## Machine/environment
 
-- Codex desktop app on macOS (Darwin).
-- Python 3.11.6, pytest 9.1.1.
-- Worktree: `/Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform`
+- Codex desktop app on Windows.
+- Worktree: `D:\code\OBSScanPlatform`
 - Branch: `codex/obs-scan-platform`
+- Python used for validation: `C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe`
 
 ## Current branch
 
 `codex/obs-scan-platform`
 
-## Latest commit before implementation
+## Latest commit before this session
 
-`50f46c01c3be9df4b318312007b32fa9def605e7` (`docs: plan OBS request fallback and progress`)
+`45d59a01cc4106e4aa3f9b9926d66f1389a9b392` (`docs: record final OBS fallback validation`)
 
-## Latest reviewed implementation commit
+## Latest commit after this session
 
-`907a0f82b9ca3d8bb25d218d2301b712a52c38b1` (`test: strengthen partial failure handoff evidence`)
-
-The final documentation commit contains this handoff and therefore cannot embed its own final hash. Resolve the pushed branch tip with:
+Pending until this handoff is committed. Resolve after commit with:
 
 ```bash
 git rev-parse HEAD
-git rev-parse origin/codex/obs-scan-platform
 ```
 
 ## Summary of what changed
 
-- Added exact prepared request URLs, bounded response bodies, exception types, attempt counts, and retry classifications to `OBSRequestError`.
-- Logged every failed attempt without redaction while suppressing successful request URLs.
-- Preserved empty `success=false` filelist/objectkeys compatibility.
-- Added complete per-bucket `errors`, compatible `partial_errors`, concise `error`, and timing fields.
-- Implemented all five endpoint boundaries and partial/header-only CSV behavior.
-- Preserved successful pages after later filelist/objectkeys failure.
-- Ensured unexpected concurrent failures cancel and await sibling tasks before bucket failure returns.
-- Added complete objectkeys prefix/page/object progress to logs and CLI tqdm.
-- Added multi-endpoint persisted manifest and partial CSV integration coverage.
-- Updated README and Chinese scan-start guidance.
+- Fixed filelist discovery so object file entries returned as bare names from child directories are converted to bucket-relative full keys before they can enter `metadata_files`.
+- Added `_filelist_object_key(path, value)` in `src/obs_scan_platform/scanner.py`.
+- The metadata request path still adds the required leading slash when encoding `objectkey`, so a discovered `alpha/direct.txt` is sent to metadata as encoded `/alpha/direct.txt`.
+- Added regression coverage for a child `filelist` response returning `direct.txt`.
+- Added explicit coverage that an already complete child key such as `alpha/direct.txt` is preserved and not double-prefixed.
 
 ## Important decisions and rationale
 
-- `OBSClient` owns transport/retry/logging detail; `Scanner` owns business fallback scope.
-- Only `OBSRequestError` is locally downgraded; other exceptions reveal implementation/filesystem failures and hard-fail the bucket.
-- Root and child filelist failures are partial because partial or header-only output remains operationally useful.
-- Existing bounded sanitized `partial_errors` remains for compatibility; detailed `errors` intentionally retains raw diagnostics.
-- A prefix is the objectkeys task; pages and objects are cumulative outcome counters.
-- Shared progress state is event-loop-owned and contains no awaits between mutations.
+- Fixed the issue at discovery time, where the bad value originated, instead of special-casing metadata requests.
+- Matched the existing folder-prefix normalization behavior to keep scanner path rules consistent.
+- Kept object rows and CSV output using slashless bucket-relative keys, preserving existing aggregation expectations.
+- Did not change objectkeys prefix request behavior; it already sends bucket paths with a leading slash and is unrelated to the metadata bare-file-name bug.
 
 ## Failed attempts or rejected approaches
 
-- Initial design push was rejected because the shared branch was 16 commits ahead; work was fetched/rebased rather than force-pushed.
-- Task 2 review found missing progress invariant enforcement and negative object acceptance; both were fixed with boundary tests.
-- Task 3 review found sibling workers could outlive a hard failure; structured cancellation was added and tested for all three concurrent groups.
-- Task 5 review requested exact detailed error dictionaries and an explicit immutable implementation SHA; both were added.
-- Rejected ambiguous empty-data returns from the client and a configurable endpoint-policy engine.
+- Direct `pytest` and `python -m pytest` were unavailable through the system PATH because WindowsApps Python is a placeholder. Used the Codex bundled Python runtime instead.
+- Full suite remains non-green on this Windows machine due to existing portability/environment issues, not this scanner change.
+- No broad refactor was done; the change is intentionally limited to filelist object key normalization and regression tests.
 
 ## Current test/build status
 
-Targeted implementation suite:
+TDD red test before implementation:
 
 ```text
-pytest tests/test_config.py tests/test_obs_client.py tests/test_models.py tests/test_scanner.py tests/test_scan_end_to_end.py -v
-101 passed
+pytest tests/test_scanner.py::test_discover_root_joins_child_file_names_to_bucket_path -q
+FAILED: discovery.metadata_files was ["direct.txt"], proving the bare-name bug.
 ```
 
-Fresh final macOS suite:
+Focused validation after implementation:
+
+```text
+pytest tests/test_scanner.py::test_discover_root_joins_child_file_names_to_bucket_path tests/test_scanner.py::test_discover_root_preserves_child_absolute_object_keys -q
+2 passed
+```
+
+Scanner validation:
+
+```text
+pytest tests/test_scanner.py -q
+61 passed
+```
+
+End-to-end scan validation:
+
+```text
+pytest tests/test_scan_end_to_end.py -q
+4 passed
+```
+
+Full Windows suite:
 
 ```text
 pytest -q
-143 passed, 1 warning in 0.48s
+139 passed, 6 failed, 1 warning
 ```
 
-The only warning is the existing dependency-side `StarletteDeprecationWarning` from FastAPI `TestClient`; no test failed.
+Known unrelated Windows failures:
 
-Final whole-branch review of `50f46c0..907a0f8` found no Critical or Important issues and assessed the branch ready to merge.
+- `tests/test_aggregation.py::test_iter_object_rows_rejects_unexpected_header`: unescaped Windows path in pytest regex `match`.
+- `tests/test_api.py::test_runs_list_ignores_symlinked_external_run`: symlink privilege failure, `WinError 1314`.
+- `tests/test_api.py::test_runs_list_ignores_symlinked_external_manifest`: symlink privilege failure, `WinError 1314`.
+- `tests/test_api.py::test_bucket_csv_downloads_file`: expected LF but response text uses CRLF on Windows.
+- `tests/test_api.py::test_run_detail_rejects_backslash_segment`: Windows treats backslash as a path separator during test setup.
+- `tests/test_cli.py::test_scan_success_path`: assertion expects `config/apps.yaml`, while `WindowsPath` stringifies as `config\apps.yaml`.
+
+Code review:
+
+```text
+Subagent review found no correctness issues in src/obs_scan_platform/scanner.py or tests/test_scanner.py.
+```
+
+Diff hygiene:
+
+```text
+git diff --check
+Only LF-to-CRLF working-copy warnings for scanner.py and test_scanner.py.
+```
 
 ## Uncommitted changes, if any
 
-After the final documentation commit, none are expected. Verify:
+Before committing this handoff, expected changed files:
+
+- `src/obs_scan_platform/scanner.py`
+- `tests/test_scanner.py`
+- `docs/current-task.md`
+- `docs/handoff.md`
+
+Untracked existing user/workspace file remains:
+
+- `CLAUDE.md`
+
+Do not commit `CLAUDE.md` unless explicitly requested.
+
+## Exact resume instructions for the next Codex session
 
 ```bash
+cd D:\code\OBSScanPlatform
 git status --short --branch
-git diff --check
+git log --oneline -5
+pytest tests/test_scanner.py -q
+pytest tests/test_scan_end_to_end.py -q
 ```
 
-## Known risks
-
-- Operational failure logs/manifests intentionally contain sensitive URLs, tokens, encoded request bodies, object keys, and response text.
-- `partial_failed` output is incomplete by definition and must be consumed together with all error fields.
-- Non-blocking Minor: the outer `_scan_application` safety-catch timing path is implemented but lacks direct timing assertions.
-
-## Exact resume instructions
-
-```bash
-cd /Users/bert_mccree/Documents/codex/OBS扫描平台/.worktrees/obs-scan-platform
-git fetch origin
-git status --short --branch
-git rev-parse HEAD
-git rev-parse origin/codex/obs-scan-platform
-pytest -q
-git log --oneline -12
-```
-
-The two hashes must match after push. Do not commit real credentials, result directories, temp CSVs, database dumps, `__pycache__`, or virtual environments.
+If full Windows suite health is required, fix or skip the six listed portability failures in a separate task. Do not mark those failures as caused by the metadata objectkey change.

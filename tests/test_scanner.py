@@ -802,6 +802,60 @@ async def test_discover_root_returns_metadata_files_not_covered_by_objectkeys_pr
 
 
 @pytest.mark.asyncio
+async def test_discover_root_joins_child_file_names_to_bucket_path():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "alpha/"}],
+                    "nextOffset": "",
+                }
+            },
+            {
+                "result": {
+                    "files": [{"objectType": "object", "objectKey": "direct.txt"}],
+                    "nextOffset": "",
+                }
+            },
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert discovery.prefixes == ["alpha/"]
+    assert discovery.metadata_files == []
+
+
+@pytest.mark.asyncio
+async def test_discover_root_preserves_child_absolute_object_keys():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "alpha/"}],
+                    "nextOffset": "",
+                }
+            },
+            {
+                "result": {
+                    "files": [{"objectType": "object", "objectKey": "alpha/direct.txt"}],
+                    "nextOffset": "",
+                }
+            },
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert discovery.prefixes == ["alpha/"]
+    assert discovery.metadata_files == []
+
+
+@pytest.mark.asyncio
 async def test_discover_root_reads_all_filelist_pages_for_each_directory():
     scanner, application, bucket = make_scanner()
     scanner.config.defaults.filelist_depth = 1

@@ -556,7 +556,9 @@ class Scanner:
                                 progress_bar.total = scheduler.pending_total_tasks
                                 progress_bar.refresh()
                     elif object_key:
-                        scheduler.record_file(task, str(object_key))
+                        file_key = self._filelist_object_key(path, object_key)
+                        if file_key:
+                            scheduler.record_file(task, file_key)
 
                 next_pointer = None
                 if isinstance(payload, dict):
@@ -611,6 +613,15 @@ class Scanner:
         if path == "/" and "/" in raw_prefix:
             raw_prefix = raw_prefix.split("/", 1)[0]
         return f"{raw_prefix.rstrip('/')}/"
+
+    def _filelist_object_key(self, path: str, value: Any) -> str:
+        raw_key = str(value or "").strip("/")
+        if not raw_key:
+            return ""
+        current_prefix = path.strip("/")
+        if current_prefix and not raw_key.startswith(f"{current_prefix}/"):
+            raw_key = f"{current_prefix}/{raw_key}"
+        return raw_key
 
     async def _collect_metadata_files(
         self,

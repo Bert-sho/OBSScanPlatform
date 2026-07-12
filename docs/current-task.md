@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Implement OBS request diagnostics, endpoint fallback, bucket timing, and objectkeys progress
+Fix metadata objectkey bucket-absolute paths
 
 ## Current branch
 
@@ -14,79 +14,51 @@ Implement OBS request diagnostics, endpoint fallback, bucket timing, and objectk
 
 ## User goal
 
-Fix excessive successful-request URL logs and whole-bucket aborts, log detailed unredacted failed requests, define fallback for all five OBS interfaces, preserve usable partial CSVs, improve per-bucket manifest errors/timing, and record complete objectkeys progress.
+Ensure the metadata interface receives `objectkey` as the file's bucket-absolute path, not only a bare file name.
 
 ## Completed work
 
-- Suppressed normal successful `httpx`/`httpcore` request URL output.
-- Added unredacted failed-attempt URL/body diagnostics with a 2048-character response limit.
-- Changed the default to three retries after the initial request and classified transient HTTP, transport, OBS business, and invalid-JSON failures.
-- Added complete structured request errors while preserving sanitized bounded `partial_errors` compatibility.
-- Made all filelist request failures recoverable and retained successful earlier-page discoveries.
-- Kept `listbuckets` as an application hard failure and `bucket_endpoint` as a bucket hard failure.
-- Kept metadata/objectkeys request failures local to one object/prefix; unexpected exceptions hard-fail cleanly.
-- Added sibling-task cancellation and awaiting before propagating unexpected worker failures.
-- Added `success`, `partial_failed`, and `failed` bucket start/end/elapsed fields.
-- Added objectkeys completed/total/succeeded/failed/pages/objects logs and CLI tqdm postfix.
-- Added exact three-endpoint partial-failure end-to-end manifest and CSV evidence.
-- Updated operator documentation and cross-machine handoff.
-- Completed per-task reviews and a final whole-branch review with no Critical or Important findings.
-
-Implementation commits:
-
-- `c4c8ddb` `feat: add detailed OBS request diagnostics`
-- `7dee674` `feat: model detailed bucket request failures`
-- `9194e81` `fix: enforce objectkeys progress invariants`
-- `91d3f09` `feat: refine OBS endpoint fallback and bucket timing`
-- `5d65fe4` `fix: cancel sibling scan workers on failure`
-- `cfdc381` `feat: expand objectkeys scan progress`
-- `de5d3c0` `docs: finalize OBS fallback diagnostics handoff`
-- `907a0f8` `test: strengthen partial failure handoff evidence`
+- Traced the metadata object key data flow from `filelist` discovery through `RootDiscovery.metadata_files` into `_collect_metadata_files`.
+- Confirmed the root cause: child directory filelist responses with bare names such as `direct.txt` were recorded without the current directory prefix, so metadata could request `/direct.txt` instead of `/alpha/direct.txt`.
+- Added `_filelist_object_key()` to normalize file entries the same way folder entries are normalized: preserve already bucket-absolute keys, and prefix bare child names with the current filelist path.
+- Added regression tests for bare child file names and already bucket-absolute child object keys.
+- Requested code review; reviewer reported no correctness issues.
 
 ## Remaining work
 
-None for the approved implementation. A non-blocking maintenance test could directly assert timing fields from the outer `_scan_application` safety catch.
+None for this request.
 
 ## Key files changed
 
-- `src/obs_scan_platform/config.py`
-- `src/obs_scan_platform/obs_client.py`
-- `src/obs_scan_platform/models.py`
-- `src/obs_scan_platform/filelist_discovery.py`
 - `src/obs_scan_platform/scanner.py`
-- `config/apps.example.yaml`
-- `tests/test_config.py`
-- `tests/test_obs_client.py`
-- `tests/test_models.py`
 - `tests/test_scanner.py`
-- `tests/test_scan_end_to_end.py`
-- `README.md`
-- `docs/scan-start-guide.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
-- `pytest tests/test_config.py tests/test_obs_client.py tests/test_models.py tests/test_scanner.py tests/test_scan_end_to_end.py -v`
+- `pytest tests/test_scanner.py::test_discover_root_joins_child_file_names_to_bucket_path -q` before implementation: failed as expected with `metadata_files == ["direct.txt"]`.
+- `pytest tests/test_scanner.py::test_discover_root_joins_child_file_names_to_bucket_path tests/test_scanner.py::test_discover_root_preserves_child_absolute_object_keys -q`
+- `pytest tests/test_scanner.py -q`
+- `pytest tests/test_scan_end_to_end.py -q`
 - `pytest -q`
-- `git status --short --branch`
 - `git diff --check`
-- Full task and whole-branch diff reviews.
-- Synthetic-token and private-key pattern scans.
+- Code review subagent on the uncommitted diff.
 
 ## Validation result
 
-- Targeted suite: `101 passed`.
-- Fresh final macOS full suite: `143 passed, 1 warning in 0.48s`.
-- The warning is the existing dependency-side `StarletteDeprecationWarning` from FastAPI `TestClient`; no test failed.
-- Final whole-branch review: ready to merge, no Critical or Important issues.
+- New focused tests: `2 passed`.
+- Scanner suite: `61 passed`.
+- Scan end-to-end suite: `4 passed`.
+- Full Windows suite: `139 passed, 6 failed, 1 warning`.
+- The 6 full-suite failures are pre-existing Windows environment/test portability issues: regex matching an unescaped Windows path, symlink privilege failures (`WinError 1314`), CRLF response text expectation, backslash path segment setup, and a CLI assertion expecting forward slashes.
+- `git diff --check` reported only LF-to-CRLF working-copy warnings.
+- Code review found no correctness issues.
 
 ## Known risks
 
-- Failed attempts intentionally write unredacted URLs and up to 2048 response characters; final failures persist the same sensitive context in manifests.
-- Operators must restrict access to logs/manifests and must not interpret a `partial_failed` CSV as complete without checking `error`, `partial_errors`, and `errors`.
-- Minor test coverage opportunity: directly assert all timing fields in the outer bucket safety-catch regression.
+- Full test suite still has unrelated Windows portability failures. The task-specific scanner and end-to-end coverage passes in this environment.
 
 ## Next recommended action
 
-Verify the pushed remote tip matches the local branch, then use the branch for deployment or PR review as appropriate.
+Use the pushed branch for review/deployment, or separately fix the Windows portability test failures if this repository needs a green full suite on Windows.
