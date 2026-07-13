@@ -60,11 +60,15 @@ Recommended request concurrency defaults:
 
 ```yaml
 scan:
+  bucket_concurrency: 4
   global_request_concurrency: 150
+  metadata_concurrency_per_bucket: 8
   objectkeys_concurrency_per_bucket: 30
 ```
 
-`objectkeys_concurrency_per_bucket` limits only per-bucket `objectkeys` prefix workers. `filelist` and metadata requests still share the global request limit. The legacy `scan.per_bucket_prefix_concurrency` setting remains compatible, but new configs should use `scan.objectkeys_concurrency_per_bucket`.
+Applications have no independent scan concurrency limit. `bucket_concurrency` is one run-wide limit shared across all applications and covers each bucket's full lifecycle through temporary-directory finalization. Application `listbuckets` calls do not consume bucket capacity, but they do consume `global_request_concurrency` capacity along with every other HTTP request.
+
+`metadata_concurrency_per_bucket` and `objectkeys_concurrency_per_bucket` limit their respective per-bucket workers. `filelist` and metadata requests still share the global request limit. The legacy `scan.per_bucket_prefix_concurrency` setting remains compatible, but new configs should use `scan.objectkeys_concurrency_per_bucket`.
 
 For each bucket, scanning completes all `filelist` discovery and metadata requests before starting `objectkeys` collection.
 
@@ -122,14 +126,14 @@ Each successfully aggregated bucket writes one directory summary CSV, including 
 results/<run_id>/<appid>/<bucket>.csv
 ```
 
-The final bucket CSV contains directory-level rollups only. It does not store the full object file list. Per-object temporary CSV files are written under `results/<run_id>/_tmp/` while a bucket is being scanned. When `scan.keep_temp_files` is `false` (the default), temporary files are removed for `success`, `partial_failed`, and `failed` buckets; when it is `true`, temporary files are retained for every bucket status.
+The final bucket CSV contains directory-level rollups only. It does not store the full object file list. Per-object temporary CSV files are written under `results/<run_id>/_tmp/` while a bucket is being scanned. When `scan.keep_temp_files` is `false` (the default), each bucket's temporary directory is removed immediately after its final result and before its shared bucket permit is released, for `success`, `partial_failed`, and `failed` buckets. When it is `true`, temporary files are retained for every bucket status.
 
 Each run also writes:
 
 - `results/<run_id>/manifest.json`
 - `results/<run_id>/scan.log`
 
-`scan.log` includes per-bucket filelist progress lines and objectkeys progress fields `completed`, `total`, `succeeded`, `failed`, `pages`, and `objects`. Every bucket manifest entry includes `started_ms`, `ended_ms`, `started_at`, `ended_at`, and monotonic `elapsed_seconds` timing fields. The total is split into `request_elapsed_seconds` (bucket endpoint, filelist, metadata, and objectkeys collection, including waits/retries/parsing) and `processing_elapsed_seconds` (temporary CSV reading, deduplication, aggregation, and final CSV generation). A request-stage failure reports zero processing time; a processing-stage failure preserves both measured phases. Because buckets run concurrently, per-bucket phase durations must not be summed as the run's wall-clock duration.
+`scan.log` includes per-bucket filelist progress lines, metadata progress fields `completed`, `total`, `succeeded`, and `failed`, and objectkeys progress fields `completed`, `total`, `succeeded`, `failed`, `pages`, and `objects`. Metadata `total` is the number of metadata tasks produced by filelist; when that count is zero, the scanner writes one `metadata skipped ... total=0` record. Every bucket manifest entry includes `started_ms`, `ended_ms`, `started_at`, `ended_at`, and monotonic `elapsed_seconds` timing fields. The total is split into `request_elapsed_seconds` (bucket endpoint, filelist, metadata, and objectkeys collection, including waits/retries/parsing) and `processing_elapsed_seconds` (temporary CSV reading, deduplication, aggregation, and final CSV generation). A request-stage failure reports zero processing time; a processing-stage failure preserves both measured phases. Because buckets run concurrently, per-bucket phase durations must not be summed as the run's wall-clock duration.
 
 Normal successful requests suppress full OBS URLs. Every failed attempt logs its unredacted prepared URL and up to 2048 response characters, together with attempt counters, status, reason, truncation metadata, and exception type. The default retry policy makes up to three retries after the initial request (four attempts total) for retryable failures.
 

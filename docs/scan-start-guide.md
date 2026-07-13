@@ -60,11 +60,15 @@ applications:
 
 ```yaml
 scan:
+  bucket_concurrency: 4
   global_request_concurrency: 150
+  metadata_concurrency_per_bucket: 8
   objectkeys_concurrency_per_bucket: 30
 ```
 
-`objectkeys_concurrency_per_bucket` 只限制单个桶内 objectkeys 前缀 worker 的并发；`filelist` 和 metadata 请求仍受全局请求并发限制。旧配置项 `per_bucket_prefix_concurrency` 仍兼容，但新配置建议使用 `objectkeys_concurrency_per_bucket`。
+应用没有独立的扫描并发限制。`bucket_concurrency` 是所有应用共享的单次运行全局桶并发限制，覆盖每个桶从开始扫描到临时目录最终处理完成的完整生命周期。各应用的 `listbuckets` 不占用桶并发容量，但与其他所有 HTTP 请求一样占用 `global_request_concurrency` 容量。
+
+`metadata_concurrency_per_bucket` 和 `objectkeys_concurrency_per_bucket` 分别限制单个桶内对应 worker 的并发；`filelist` 和 metadata 请求仍受全局请求并发限制。旧配置项 `per_bucket_prefix_concurrency` 仍兼容，但新配置建议使用 `objectkeys_concurrency_per_bucket`。
 
 每个桶会先完成全部 `filelist` 发现和 metadata 获取，再开始 `objectkeys` 获取。
 
@@ -234,10 +238,10 @@ curl -o owned-bucket.csv \
 每次扫描会生成：
 
 - `results/<run_id>/manifest.json`：本次扫描的应用、桶、状态、CSV 路径、错误和时间。
-- `results/<run_id>/scan.log`：扫描日志，包含 filelist 进度，以及 objectkeys 前缀的 `completed` / `total` / `succeeded` / `failed` / `pages` / `objects` 进度。
+- `results/<run_id>/scan.log`：扫描日志，包含 filelist 进度、metadata 的 `completed` / `total` / `succeeded` / `failed` 进度，以及 objectkeys 前缀的 `completed` / `total` / `succeeded` / `failed` / `pages` / `objects` 进度。metadata 的 `total` 是 filelist 生成的 metadata 任务数；当 `total=0` 时只写一条 `metadata skipped` 记录。
 - `results/<run_id>/<appid>/<bucket>.csv`：每个桶一个目录级汇总 CSV。
 
-最终桶 CSV 只保存目录汇总信息，不保存完整文件清单。对象级临时 CSV 在扫描过程中写入 `results/<run_id>/_tmp/`。`scan.keep_temp_files` 默认为 `false`：无论桶最终为 `success`、`partial_failed` 还是 `failed`，都会删除对应临时目录；设为 `true` 时则保留所有状态的临时目录。
+最终桶 CSV 只保存目录汇总信息，不保存完整文件清单。对象级临时 CSV 在扫描过程中写入 `results/<run_id>/_tmp/`。`scan.keep_temp_files` 默认为 `false`：每个桶一得到最终结果就会立即删除对应临时目录，然后才释放共享桶并发许可，无论桶最终为 `success`、`partial_failed` 还是 `failed`；设为 `true` 时则保留所有状态的临时目录。
 
 如果桶为空，或桶内只有空文件夹，扫描仍会成功，并生成只有表头的桶 CSV。
 

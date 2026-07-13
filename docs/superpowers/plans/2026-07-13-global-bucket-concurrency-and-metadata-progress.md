@@ -48,7 +48,7 @@
 - Produces: `Scanner._scan_application(..., scan_started_ms: int, bucket_semaphore: asyncio.Semaphore) -> dict[str, Any]`.
 - Produces: one shared semaphore per `Scanner.run()` invocation.
 
-- [ ] **Step 1: Establish the baseline**
+- [x] **Step 1: Establish the baseline**
 
 Run:
 
@@ -58,7 +58,7 @@ python -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_
 
 Expected: all existing tests pass. Record the exact count and duration in the task notes.
 
-- [ ] **Step 2: Write failing configuration migration tests**
+- [x] **Step 2: Write failing configuration migration tests**
 
 Add to `tests/test_config.py`:
 
@@ -92,7 +92,7 @@ applications:
 
 Also remove `app_concurrency` from the primary YAML fixture at the top of `tests/test_config.py`; compatibility is covered by the dedicated test above.
 
-- [ ] **Step 3: Write failing run-wide scheduling tests**
+- [x] **Step 3: Write failing run-wide scheduling tests**
 
 Add these helpers/tests to `tests/test_scanner.py` near the existing run/application tests:
 
@@ -187,7 +187,7 @@ async def test_run_starts_all_application_enumerations_without_app_limit(
     assert peak == 2
 ```
 
-- [ ] **Step 4: Run the focused tests and verify RED**
+- [x] **Step 4: Run the focused tests and verify RED**
 
 Run:
 
@@ -197,7 +197,7 @@ python -m pytest tests/test_config.py::test_legacy_app_concurrency_is_ignored_an
 
 Expected: all three tests fail against the old design: the modeled field still exists, per-application bucket semaphores allow a peak above one, and `app_concurrency: 1` serializes enumeration.
 
-- [ ] **Step 5: Implement the minimal configuration and scheduler change**
+- [x] **Step 5: Implement the minimal configuration and scheduler change**
 
 Delete this field from `ScanSettings` in `src/obs_scan_platform/config.py`:
 
@@ -248,7 +248,7 @@ Keep the existing `async with bucket_semaphore:` in `scan_bucket_with_limit`. Up
 
 Remove `app_concurrency` assignments from `tests/test_scan_end_to_end.py` and remove the field from `config/apps.example.yaml`.
 
-- [ ] **Step 6: Run focused and relevant tests and verify GREEN**
+- [x] **Step 6: Run focused and relevant tests and verify GREEN**
 
 Run:
 
@@ -258,7 +258,7 @@ python -m pytest tests/test_config.py tests/test_scanner.py::test_run_applies_bu
 
 Expected: all selected tests pass; no test references `config.scan.app_concurrency`.
 
-- [ ] **Step 7: Review and commit Task 1**
+- [x] **Step 7: Review and commit Task 1**
 
 Run:
 
@@ -284,7 +284,7 @@ Expected: one focused commit containing only configuration, scheduling, and thei
 - Produces: `metadata start`, `metadata progress`, `metadata finish`, and `metadata skipped` log records.
 - Invariant: `completed == succeeded + failed <= total`.
 
-- [ ] **Step 1: Add a deterministic mixed-outcome test client**
+- [x] **Step 1: Add a deterministic mixed-outcome test client**
 
 Add near the existing metadata clients in `tests/test_scanner.py`:
 
@@ -308,7 +308,7 @@ class MetadataProgressClient:
         }
 ```
 
-- [ ] **Step 2: Write failing metadata progress tests**
+- [x] **Step 2: Write failing metadata progress tests**
 
 Add:
 
@@ -368,7 +368,7 @@ async def test_metadata_logs_skipped_for_empty_task_list(
 
 If the existing warning is captured at `WARNING` but not `INFO` due logger configuration, filter the exact warning separately and keep the progress sequence assertions exact. Do not weaken counter assertions.
 
-- [ ] **Step 3: Run the focused tests and verify RED**
+- [x] **Step 3: Run the focused tests and verify RED**
 
 Run:
 
@@ -378,7 +378,7 @@ python -m pytest tests/test_scanner.py::test_metadata_logs_progress_for_success_
 
 Expected: both fail because metadata currently emits neither stage nor progress records.
 
-- [ ] **Step 4: Implement minimal metadata counters and logs**
+- [x] **Step 4: Implement minimal metadata counters and logs**
 
 At the start of `_collect_metadata_files`, add:
 
@@ -467,7 +467,7 @@ LOGGER.info(
 
 Do not add a progress-bar helper or modify `show_progress` behavior.
 
-- [ ] **Step 5: Run metadata and phase-order regressions**
+- [x] **Step 5: Run metadata and phase-order regressions**
 
 Run:
 
@@ -477,7 +477,7 @@ python -m pytest tests/test_scanner.py -k "metadata or phase or objectkeys" -q
 
 Expected: all selected tests pass, including continuation from metadata failures into objectkeys.
 
-- [ ] **Step 6: Review and commit Task 2**
+- [x] **Step 6: Review and commit Task 2**
 
 Run:
 
@@ -503,7 +503,7 @@ Expected: one focused progress-logging commit.
 - Produces: retention finalization before the shared bucket semaphore is released.
 - Preserves: manifest `temp_dir` only when retention is enabled.
 
-- [ ] **Step 1: Replace manifest-time cleanup tests with wrapper-finalization tests**
+- [x] **Step 1: Replace manifest-time cleanup tests with wrapper-finalization tests**
 
 Replace `test_bucket_manifest_deletes_temp_dir_for_every_status_when_retention_disabled` with:
 
@@ -550,7 +550,7 @@ async def test_scan_application_deletes_each_bucket_temp_dir_after_final_result(
     assert not temp_dir.exists()
 ```
 
-- [ ] **Step 2: Write a failing timing test proving cleanup does not wait for sibling buckets**
+- [x] **Step 2: Write a failing timing test proving cleanup does not wait for sibling buckets**
 
 Add:
 
@@ -644,7 +644,7 @@ def test_bucket_manifest_does_not_delete_temp_dir_when_retention_disabled(tmp_pa
     assert "temp_dir" not in manifest
 ```
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 3: Run focused tests and verify RED**
 
 Run:
 
@@ -654,7 +654,7 @@ python -m pytest tests/test_scanner.py::test_scan_application_deletes_each_bucke
 
 Expected: wrapper-finalization tests fail because deletion still happens only during manifest conversion; serialization test fails because manifest conversion deletes the directory.
 
-- [ ] **Step 4: Move cleanup into the bucket wrapper**
+- [x] **Step 4: Move cleanup into the bucket wrapper**
 
 Refactor `scan_bucket_with_limit` so it assigns a result on both paths, then finalizes the directory before returning:
 
@@ -713,7 +713,7 @@ return manifest
 
 Do not catch and suppress `shutil.rmtree` errors.
 
-- [ ] **Step 5: Extend the existing unexpected-bucket regression**
+- [x] **Step 5: Extend the existing unexpected-bucket regression**
 
 In `test_scan_application_keeps_other_buckets_after_unexpected_bucket_failure`, make the fake failing bucket create its temp directory before raising, and add:
 
@@ -723,7 +723,7 @@ assert not (tmp_path / scanner.config.scan.temp_subdir / application.appid / "ba
 
 This proves the outer fallback result also reaches finalization.
 
-- [ ] **Step 6: Run temp-retention and bucket-failure regressions**
+- [x] **Step 6: Run temp-retention and bucket-failure regressions**
 
 Run:
 
@@ -734,7 +734,7 @@ python -m pytest tests/test_scan_end_to_end.py -q
 
 Expected: all selected tests pass; retained directories and `temp_dir` manifest entries remain unchanged when `keep_temp_files=true`.
 
-- [ ] **Step 7: Review and commit Task 3**
+- [x] **Step 7: Review and commit Task 3**
 
 Run:
 
@@ -761,7 +761,7 @@ Expected: one focused finalization commit.
 - Consumes: the completed configuration and scanner behavior from Tasks 1-3.
 - Produces: current operator guidance and a self-contained Git handoff.
 
-- [ ] **Step 1: Update operator documentation**
+- [x] **Step 1: Update operator documentation**
 
 Update the concurrency sections in README and the Chinese guide to include this exact semantic content:
 
@@ -783,7 +783,7 @@ Document:
 - `total=0` produces a skipped record;
 - cleanup is immediate per bucket when `keep_temp_files=false`.
 
-- [ ] **Step 2: Run the complete test suite**
+- [x] **Step 2: Run the complete test suite**
 
 Run:
 
@@ -808,7 +808,7 @@ python -m pytest -q
 
 Expected: both commands pass in fresh output after all review fixes.
 
-- [ ] **Step 5: Update mandatory task and handoff documents**
+- [x] **Step 5: Update mandatory task and handoff documents**
 
 Write `docs/current-task.md` with:
 
@@ -836,7 +836,7 @@ Write `docs/handoff.md` with:
 - uncommitted changes;
 - exact resume commands for another machine.
 
-- [ ] **Step 6: Inspect the complete diff and secrets before final commit**
+- [x] **Step 6: Inspect the complete diff and secrets before final commit**
 
 Run:
 
@@ -850,7 +850,7 @@ git diff | Select-String -Pattern '(?i)(api[_-]?key|secret|password|private[_-]?
 
 Expected: only requested code, tests, current docs, design/plan, and handoff changes; no secrets or unexpected machine-specific paths. Review benign fixture matches manually rather than ignoring the scan.
 
-- [ ] **Step 7: Commit documentation and handoff**
+- [x] **Step 7: Commit documentation and handoff**
 
 Run:
 
