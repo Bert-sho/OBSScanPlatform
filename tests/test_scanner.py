@@ -1416,6 +1416,25 @@ class MetadataPartialFailureClient:
         }
 
 
+class MetadataProgressClient:
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        del url, headers, endpoint
+        object_key = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
+        if object_key == "request-failed.txt":
+            raise detailed_request_error("metadata", "metadata unavailable")
+        if object_key == "invalid.txt":
+            return {"result": {"objectKey": {"objectKey": object_key}}}
+        return {
+            "result": {
+                "objectKey": {
+                    "objectKey": object_key,
+                    "size": "12",
+                    "lastModifyTime": "1000",
+                }
+            }
+        }
+
+
 class ObjectkeysPartialFailureClient:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
@@ -1477,6 +1496,59 @@ class UnexpectedMetadataClient:
 class UnexpectedObjectkeysClient:
     async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
         raise RuntimeError("objectkeys parser bug")
+
+
+@pytest.mark.asyncio
+async def test_metadata_logs_progress_for_success_failure_and_invalid_response(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    scanner, application, bucket = make_scanner()
+    scanner.config.scan.metadata_concurrency_per_bucket = 1
+    partial_errors = PartialErrorSummary()
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        await scanner._collect_metadata_files(
+            application,
+            bucket,
+            "http://bucket-endpoint",
+            ["good.txt", "request-failed.txt", "invalid.txt"],
+            tmp_path,
+            MetadataProgressClient(),
+            partial_errors=partial_errors,
+        )
+
+    messages = [record.getMessage() for record in caplog.records if record.getMessage().startswith("metadata ")]
+    assert messages == [
+        "metadata start appid=app.one bucket=bucket-name-1 total=3",
+        "metadata progress appid=app.one bucket=bucket-name-1 completed=1 total=3 succeeded=1 failed=0",
+        "metadata object failure appid=app.one bucket=bucket-name-1 object_key=request-failed.txt error=OBS request failed endpoint=metadata status=503 reason=metadata unavailable",
+        "metadata progress appid=app.one bucket=bucket-name-1 completed=2 total=3 succeeded=1 failed=1",
+        "metadata progress appid=app.one bucket=bucket-name-1 completed=3 total=3 succeeded=1 failed=2",
+        "metadata finish appid=app.one bucket=bucket-name-1 completed=3 total=3 succeeded=1 failed=2",
+    ]
+    assert partial_errors.metadata_failed_files == 1
+
+
+@pytest.mark.asyncio
+async def test_metadata_logs_skipped_for_empty_task_list(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    scanner, application, bucket = make_scanner()
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        await scanner._collect_metadata_files(
+            application,
+            bucket,
+            "http://bucket-endpoint",
+            [],
+            tmp_path,
+            FakeClient([]),
+        )
+
+    messages = [record.getMessage() for record in caplog.records if record.getMessage().startswith("metadata ")]
+    assert messages == ["metadata skipped appid=app.one bucket=bucket-name-1 total=0"]
 
 
 class CancellingWorkerClient:

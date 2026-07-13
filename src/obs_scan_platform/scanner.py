@@ -662,17 +662,28 @@ class Scanner:
         client: OBSClient,
         partial_errors: PartialErrorSummary | None = None,
     ) -> None:
+        total = len(object_keys)
+        if total == 0:
+            LOGGER.info("metadata skipped appid=%s bucket=%s total=0", application.appid, bucket.name)
+            return
+
+        completed = 0
+        succeeded = 0
+        failed = 0
+        LOGGER.info("metadata start appid=%s bucket=%s total=%s", application.appid, bucket.name, total)
         rows: list[ObjectRow] = []
         queue: asyncio.Queue[str] = asyncio.Queue()
         for object_key in object_keys:
             queue.put_nowait(object_key)
 
         async def worker() -> None:
+            nonlocal completed, succeeded, failed
             while True:
                 try:
                     object_key = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     return
+                task_succeeded = False
                 try:
                     data = await client.get_json(
                         _endpoint(endpoint, "/rest/boto3/s3/object/metadata"),
@@ -690,6 +701,7 @@ class Scanner:
                     row = self._metadata_to_object_row(object_key, data)
                     if row is not None:
                         rows.append(row)
+                        task_succeeded = True
                 except Exception as exc:
                     if partial_errors is not None:
                         partial_errors.record("metadata", object_key, exc, scope="object_key")
@@ -702,11 +714,34 @@ class Scanner:
                         sanitized_error,
                     )
                 finally:
+                    if task_succeeded:
+                        succeeded += 1
+                    else:
+                        failed += 1
+                    completed += 1
+                    LOGGER.info(
+                        "metadata progress appid=%s bucket=%s completed=%s total=%s succeeded=%s failed=%s",
+                        application.appid,
+                        bucket.name,
+                        completed,
+                        total,
+                        succeeded,
+                        failed,
+                    )
                     queue.task_done()
 
         worker_count = min(max(1, self.config.scan.metadata_concurrency_per_bucket), len(object_keys))
         if worker_count:
             await _gather_cancel_on_error(*(worker() for _ in range(worker_count)))
+        LOGGER.info(
+            "metadata finish appid=%s bucket=%s completed=%s total=%s succeeded=%s failed=%s",
+            application.appid,
+            bucket.name,
+            completed,
+            total,
+            succeeded,
+            failed,
+        )
         if rows:
             append_object_rows(temp_dir / "metadata_files.csv", rows)
 
