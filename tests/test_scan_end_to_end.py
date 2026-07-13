@@ -464,6 +464,11 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
     assert bucket_manifest["started_at"].endswith("Z")
     assert bucket_manifest["ended_at"].endswith("Z")
     assert bucket_manifest["elapsed_seconds"] >= 0
+    assert bucket_manifest["request_elapsed_seconds"] >= 0
+    assert bucket_manifest["processing_elapsed_seconds"] >= 0
+    assert bucket_manifest["elapsed_seconds"] == pytest.approx(
+        bucket_manifest["request_elapsed_seconds"] + bucket_manifest["processing_elapsed_seconds"]
+    )
     assert csv_path.exists()
 
     rows = {row["directory_path"]: row for row in csv.DictReader(csv_path.open(newline="", encoding="utf-8"))}

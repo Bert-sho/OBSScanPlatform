@@ -129,7 +129,7 @@ Each run also writes:
 - `results/<run_id>/manifest.json`
 - `results/<run_id>/scan.log`
 
-`scan.log` includes per-bucket filelist progress lines and objectkeys progress fields `completed`, `total`, `succeeded`, `failed`, `pages`, and `objects`. Every bucket manifest entry includes `started_ms`, `ended_ms`, `started_at`, `ended_at`, and monotonic `elapsed_seconds` timing fields.
+`scan.log` includes per-bucket filelist progress lines and objectkeys progress fields `completed`, `total`, `succeeded`, `failed`, `pages`, and `objects`. Every bucket manifest entry includes `started_ms`, `ended_ms`, `started_at`, `ended_at`, and monotonic `elapsed_seconds` timing fields. The total is split into `request_elapsed_seconds` (bucket endpoint, filelist, metadata, and objectkeys collection, including waits/retries/parsing) and `processing_elapsed_seconds` (temporary CSV reading, deduplication, aggregation, and final CSV generation). A request-stage failure reports zero processing time; a processing-stage failure preserves both measured phases. Because buckets run concurrently, per-bucket phase durations must not be summed as the run's wall-clock duration.
 
 Normal successful requests suppress full OBS URLs. Every failed attempt logs its unredacted prepared URL and up to 2048 response characters, together with attempt counters, status, reason, truncation metadata, and exception type. The default retry policy makes up to three retries after the initial request (four attempts total) for retryable failures.
 

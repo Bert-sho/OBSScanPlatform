@@ -257,7 +257,7 @@ curl -o owned-bucket.csv \
 - `partial_errors` 保留兼容计数和有限样本；
 - `errors` 保留每个最终请求失败的详细记录。
 
-部分 CSV 会保留已成功收集的行，并缺少只能从失败请求获得的数据。未检查上述状态和错误字段前，不得将部分 CSV 视为完整结果。每个桶还有 `started_ms` / `ended_ms`、UTC `started_at` / `ended_at` 和单调计时的 `elapsed_seconds`。
+部分 CSV 会保留已成功收集的行，并缺少只能从失败请求获得的数据。未检查上述状态和错误字段前，不得将部分 CSV 视为完整结果。每个桶还有 `started_ms` / `ended_ms`、UTC `started_at` / `ended_at` 和单调计时的 `elapsed_seconds`。总耗时进一步拆分为 `request_elapsed_seconds`（bucket endpoint、filelist、metadata、objectkeys 的采集阶段，包含并发等待、重试退避和响应解析）与 `processing_elapsed_seconds`（读取临时 CSV、去重、聚合并生成最终 CSV）。请求阶段失败时处理时间为 `0.0`；处理阶段失败时保留两个阶段已经发生的实际耗时。桶之间并发执行，因此不能把各桶阶段耗时简单相加当作整次扫描的墙钟时间。
 
 ## 常见问题
 

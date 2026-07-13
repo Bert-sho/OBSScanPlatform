@@ -247,6 +247,8 @@ class Scanner:
                                 started_at=_iso_utc(started_ms),
                                 ended_at=_iso_utc(ended_ms),
                                 elapsed_seconds=elapsed_seconds,
+                                request_elapsed_seconds=elapsed_seconds,
+                                processing_elapsed_seconds=0.0,
                             )
 
                 bucket_results = await asyncio.gather(*(scan_bucket_with_limit(bucket) for bucket in buckets))
@@ -316,6 +318,13 @@ class Scanner:
     ) -> BucketScanResult:
         started_ms = _now_ms()
         bucket_started = time.monotonic()
+        phase_boundary: float | None = None
+
+        def phase_elapsed_seconds(bucket_ended: float) -> tuple[float, float]:
+            if phase_boundary is None:
+                return bucket_ended - bucket_started, 0.0
+            return phase_boundary - bucket_started, bucket_ended - phase_boundary
+
         LOGGER.info("bucket start appid=%s bucket=%s", application.appid, bucket.name)
         thresholds = self.config.thresholds_for(application, bucket.name)
         partial_errors = PartialErrorSummary()
@@ -348,6 +357,7 @@ class Scanner:
                 client,
                 partial_errors,
             )
+            phase_boundary = time.monotonic()
             aggregate_bucket(
                 run_id=run_id,
                 appid=application.appid,
@@ -360,7 +370,9 @@ class Scanner:
             )
         except OBSRequestError as exc:
             ended_ms = _now_ms()
-            elapsed_seconds = time.monotonic() - bucket_started
+            bucket_ended = time.monotonic()
+            elapsed_seconds = bucket_ended - bucket_started
+            request_elapsed_seconds, processing_elapsed_seconds = phase_elapsed_seconds(bucket_ended)
             LOGGER.exception(
                 "bucket failure appid=%s bucket=%s elapsed_seconds=%.3f",
                 application.appid,
@@ -385,10 +397,14 @@ class Scanner:
                 started_at=_iso_utc(started_ms),
                 ended_at=_iso_utc(ended_ms),
                 elapsed_seconds=elapsed_seconds,
+                request_elapsed_seconds=request_elapsed_seconds,
+                processing_elapsed_seconds=processing_elapsed_seconds,
             )
         except Exception as exc:
             ended_ms = _now_ms()
-            elapsed_seconds = time.monotonic() - bucket_started
+            bucket_ended = time.monotonic()
+            elapsed_seconds = bucket_ended - bucket_started
+            request_elapsed_seconds, processing_elapsed_seconds = phase_elapsed_seconds(bucket_ended)
             LOGGER.exception(
                 "bucket failure appid=%s bucket=%s elapsed_seconds=%.3f",
                 application.appid,
@@ -410,10 +426,14 @@ class Scanner:
                 started_at=_iso_utc(started_ms),
                 ended_at=_iso_utc(ended_ms),
                 elapsed_seconds=elapsed_seconds,
+                request_elapsed_seconds=request_elapsed_seconds,
+                processing_elapsed_seconds=processing_elapsed_seconds,
             )
 
         ended_ms = _now_ms()
-        elapsed_seconds = time.monotonic() - bucket_started
+        bucket_ended = time.monotonic()
+        elapsed_seconds = bucket_ended - bucket_started
+        request_elapsed_seconds, processing_elapsed_seconds = phase_elapsed_seconds(bucket_ended)
         status = ScanStatus.PARTIAL_FAILED if partial_errors.has_errors() else ScanStatus.SUCCESS
         LOGGER.info(
             "bucket finish appid=%s bucket=%s status=%s elapsed_seconds=%.3f",
@@ -437,6 +457,8 @@ class Scanner:
             started_at=_iso_utc(started_ms),
             ended_at=_iso_utc(ended_ms),
             elapsed_seconds=elapsed_seconds,
+            request_elapsed_seconds=request_elapsed_seconds,
+            processing_elapsed_seconds=processing_elapsed_seconds,
         )
 
     async def _get_bucket_endpoint(
@@ -862,6 +884,8 @@ class Scanner:
             "started_at": result.started_at,
             "ended_at": result.ended_at,
             "elapsed_seconds": result.elapsed_seconds,
+            "request_elapsed_seconds": result.request_elapsed_seconds,
+            "processing_elapsed_seconds": result.processing_elapsed_seconds,
         }
         if result.partial_errors is not None and result.partial_errors.has_errors():
             manifest["partial_errors"] = result.partial_errors.to_manifest()

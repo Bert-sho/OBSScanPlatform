@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-`2026-07-13` (Asia/Shanghai)
+`2026-07-13 15:03:49 +08:00` (Asia/Shanghai)
 
 ## Machine/environment
 
@@ -16,11 +16,11 @@
 
 ## Latest commit before this session
 
-`fe7f93672618479ee9df9fe60688c636396b3dca` (`wip: align prefix tasks and isolate metadata failures`)
+`d5006029a113a1095dea5f6725198876cf2af649` (`feat: control temp retention for all scan statuses`)
 
 ## Implementation base commit
 
-`0a98f37` (`docs: define temp retention flag semantics`), created after design approval and before implementation edits.
+`a57538a66d1611d91d34aa010ed986edc4fc7e61` (`docs: define bucket phase timing`), committed after design approval and before implementation edits.
 
 ## Latest commit after this session
 
@@ -28,54 +28,58 @@ The final implementation/handoff commit follows the design commit on this branch
 
 ## Summary of what changed
 
-- Kept the existing `scan.keep_temp_files` boolean and its default `false`.
-- Changed `_bucket_result_to_manifest()` so retention depends only on that flag, not bucket status.
-- With `false`, existing bucket temp directories are deleted and `temp_dir` is omitted for `success`, `partial_failed`, and `failed`.
-- With `true`, all three statuses retain their directories and expose `temp_dir` in the manifest.
-- Missing temp directories are safely ignored when cleanup is enabled.
-- Updated user documentation and added the approved design and implementation plan.
+- Added `request_elapsed_seconds` and `processing_elapsed_seconds` to every bucket result and manifest entry.
+- Request timing begins at bucket start and ends after bucket endpoint, filelist, metadata, and objectkeys collection.
+- Processing timing starts at the same boundary and ends after temporary CSV reading, deduplication, aggregation, and atomic final CSV generation.
+- Preserved existing `elapsed_seconds`, timestamps, statuses, errors, CSV paths, retention, and concurrency behavior.
+- Added deterministic success/request-failure/processing-failure timing tests and end-to-end manifest coverage.
+- Documented that concurrent bucket phase durations overlap and are not run-level wall-clock totals.
 
 ## Important decisions and rationale
 
-- Reused the existing flag rather than adding a duplicate setting or enum.
-- Kept cleanup centralized at manifest conversion, matching the existing architecture and avoiding changes to scan phases.
-- Did not suppress filesystem deletion errors; only absent directories are treated as a no-op.
+- Used phase wall-clock time rather than summed individual HTTP durations so the two values meaningfully partition bucket elapsed time.
+- Used one shared monotonic boundary timestamp to avoid gaps and double counting.
+- Request-stage failures report all elapsed time as request and `0.0` processing.
+- Processing-stage failures preserve the completed request duration and actual processing-until-failure duration.
+- Did not add run/application phase totals because concurrent bucket wall-clock durations overlap.
 
 ## Failed attempts or rejected approaches
 
-- Rejected a second `keep_failed_temp_files` flag because the approved requirement is a single all-or-nothing policy.
-- Rejected a multi-value retention enum because no per-status policy was requested.
-- RED tests failed exactly on the old failed/partial-failed retention behavior; no implementation retries were needed.
+- Rejected per-request accumulated timing because concurrent calls would make it exceed bucket elapsed time.
+- Rejected per-endpoint timing because it was not requested.
+- Initial timing tests failed as expected due to absent fields and absent boundary; initial serialization tests failed on missing manifest keys.
+- No implementation retries or broad refactors were needed.
 
 ## Current test/build status
 
-Baseline before test changes:
+Baseline:
 
 ```text
-75 passed in 1.29s
+81 passed in 1.59s
 ```
 
-TDD RED:
+TDD evidence:
 
 ```text
-3 failed, 5 passed, 60 deselected
-```
-
-Focused GREEN:
-
-```text
-8 passed, 60 deselected in 0.45s
+Timing RED: 3 failed
+Timing GREEN: 3 passed in 0.47s
+Serialization RED: 2 failed
+Serialization GREEN: 2 passed in 0.45s
+Outer-wrapper RED: 1 failed
+Outer-wrapper GREEN: 1 passed in 0.50s
 ```
 
 Relevant validation:
 
 ```text
-81 passed in 1.26s
+82 passed in 1.24s
 ```
 
-Independent review validation: `81 passed in 1.17s`; no production-code findings. The handoff base wording and plan checkbox findings were corrected before final verification.
+Post-review-fix relevant validation: `82 passed in 1.18s`.
 
-Final verification before commit: `81 passed in 1.19s`.
+Independent review validation: `82 passed in 1.22s`; no remaining code findings after the outer-wrapper fix.
+
+Final verification before commit: `82 passed in 1.19s`.
 
 ## Uncommitted changes, if any
 
@@ -87,7 +91,7 @@ None expected after the final commit. Confirm with `git status --short --branch`
 cd D:\code\OBSScanPlatform
 git switch codex/obs-scan-platform
 git status --short --branch
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_models.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
 ```
 
-Confirm the branch is clean and use `keep_temp_files: true` for runs that require retained failure diagnostics.
+Confirm the branch is clean, then consume `request_elapsed_seconds` and `processing_elapsed_seconds` as per-bucket overlapping wall-clock phases.

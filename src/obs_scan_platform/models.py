@@ -285,3 +285,5 @@ class BucketScanResult:
     started_at: str = ""
     ended_at: str = ""
     elapsed_seconds: float = 0.0
+    request_elapsed_seconds: float = 0.0
+    processing_elapsed_seconds: float = 0.0

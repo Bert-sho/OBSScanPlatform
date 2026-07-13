@@ -1166,6 +1166,9 @@ async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_fail
     monkeypatch: pytest.MonkeyPatch,
 ):
     scanner, application, _ = make_scanner()
+    monotonic_times = iter([10.0, 12.0, 20.0])
+    monkeypatch.setattr("obs_scan_platform.scanner._now_ms", lambda: 1_000)
+    monkeypatch.setattr("obs_scan_platform.scanner.time", SimpleNamespace(monotonic=lambda: next(monotonic_times)))
     bad_bucket = BucketInfo("bad-id", "bad-bucket", "HEC", "cn-east-3", "owner", None)
     good_bucket = BucketInfo("good-id", "good-bucket", "HEC", "cn-east-3", "owner", None)
 
@@ -1202,6 +1205,9 @@ async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_fail
     assert [bucket["bucket_name"] for bucket in result["buckets"]] == ["bad-bucket", "good-bucket"]
     assert result["buckets"][0]["status"] == ScanStatus.FAILED.value
     assert result["buckets"][0]["error"] == "unexpected bucket boom"
+    assert result["buckets"][0]["elapsed_seconds"] == 2.0
+    assert result["buckets"][0]["request_elapsed_seconds"] == result["buckets"][0]["elapsed_seconds"]
+    assert result["buckets"][0]["processing_elapsed_seconds"] == 0.0
     assert result["buckets"][1]["status"] == ScanStatus.SUCCESS.value
 
 
@@ -1802,13 +1808,15 @@ async def test_scan_bucket_endpoint_request_failure_has_detail_and_timing(
     assert result.started_at == "1970-01-01T00:00:02.000Z"
     assert result.ended_at == "1970-01-01T00:00:05.000Z"
     assert result.elapsed_seconds == 1.5
+    assert result.request_elapsed_seconds == 1.5
+    assert result.processing_elapsed_seconds == 0.0
 
 
 @pytest.mark.asyncio
 async def test_bucket_result_records_start_end_and_elapsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     scanner, application, bucket = make_scanner()
     wall_times = iter([1_000, 4_000])
-    monotonic_times = iter([10.0, 13.25])
+    monotonic_times = iter([10.0, 12.0, 13.25])
     monkeypatch.setattr("obs_scan_platform.scanner._now_ms", lambda: next(wall_times))
     monkeypatch.setattr("obs_scan_platform.scanner.time", SimpleNamespace(monotonic=lambda: next(monotonic_times)))
 
@@ -1826,6 +1834,41 @@ async def test_bucket_result_records_start_end_and_elapsed(tmp_path: Path, monke
     assert result.started_at == "1970-01-01T00:00:01.000Z"
     assert result.ended_at == "1970-01-01T00:00:04.000Z"
     assert result.elapsed_seconds == 3.25
+    assert result.request_elapsed_seconds == 2.0
+    assert result.processing_elapsed_seconds == 1.25
+
+
+@pytest.mark.asyncio
+async def test_bucket_result_records_request_and_processing_timing_when_processing_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, application, bucket = make_scanner()
+    wall_times = iter([1_000, 4_000])
+    monotonic_times = iter([30.0, 32.0, 33.0])
+    monkeypatch.setattr("obs_scan_platform.scanner._now_ms", lambda: next(wall_times))
+    monkeypatch.setattr("obs_scan_platform.scanner.time", SimpleNamespace(monotonic=lambda: next(monotonic_times)))
+
+    def fail_aggregation(**kwargs: Any) -> int:
+        del kwargs
+        raise RuntimeError("aggregation failed")
+
+    monkeypatch.setattr("obs_scan_platform.scanner.aggregate_bucket", fail_aggregation)
+
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        FakeClient([{"result": "http://bucket-endpoint/"}, {"result": {"files": [], "nextOffset": ""}}]),
+        "run-1",
+        tmp_path,
+        scan_started_ms=500,
+    )
+
+    assert result.status == ScanStatus.FAILED
+    assert result.error == "aggregation failed"
+    assert result.elapsed_seconds == 3.0
+    assert result.request_elapsed_seconds == 2.0
+    assert result.processing_elapsed_seconds == 1.0
 
 
 @pytest.mark.asyncio
@@ -2031,6 +2074,8 @@ def test_bucket_manifest_includes_partial_errors_and_keeps_error_empty(tmp_path:
         started_at="1970-01-01T00:00:01.000Z",
         ended_at="1970-01-01T00:00:04.000Z",
         elapsed_seconds=3.0,
+        request_elapsed_seconds=2.5,
+        processing_elapsed_seconds=0.5,
     )
 
     manifest = scanner._bucket_result_to_manifest(result, tmp_path / "missing-temp")
@@ -2044,6 +2089,8 @@ def test_bucket_manifest_includes_partial_errors_and_keeps_error_empty(tmp_path:
     assert manifest["started_at"] == "1970-01-01T00:00:01.000Z"
     assert manifest["ended_at"] == "1970-01-01T00:00:04.000Z"
     assert manifest["elapsed_seconds"] == 3.0
+    assert manifest["request_elapsed_seconds"] == 2.5
+    assert manifest["processing_elapsed_seconds"] == 0.5
     assert manifest["partial_errors"] == {
         "filelist_failed_dirs": 0,
         "metadata_failed_files": 0,
