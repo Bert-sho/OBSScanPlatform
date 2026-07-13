@@ -12,7 +12,7 @@ Global bucket concurrency, metadata progress, and immediate temp finalization
 
 `wip`
 
-The requested implementation, task reviews, broad review, and task-relevant verification are complete. The complete Windows suite still has six accepted pre-existing failures, so repository policy prevents marking the task `completed`. Push is the only remaining in-scope action.
+The requested implementation, reviews, task-relevant verification, commits, and push are complete. The complete Windows suite still has six accepted pre-existing failures, so repository policy prevents marking the task `completed`.
 
 ## User goal
 
@@ -34,7 +34,7 @@ The requested implementation, task reviews, broad review, and task-relevant veri
 
 ## Remaining work
 
-- Push `codex/obs-scan-platform`, verify local and remote hashes match, and record the push result.
+- No remaining work within the approved feature scope.
 - Separately fix or platform-condition the six pre-existing Windows-only tests before this task can be marked `completed` under repository policy.
 
 ## Key files changed
@@ -84,4 +84,4 @@ Task-specific RED/GREEN evidence is preserved in `.superpowers/sdd/` reports.
 
 ## Next recommended action
 
-Push the current feature branch and verify remote parity. Track the unrelated Windows portability failures separately; keep this task `wip` until the full suite is green or repository policy is explicitly changed.
+Track the unrelated Windows portability failures separately; keep this task `wip` until the full suite is green or repository policy is explicitly changed.

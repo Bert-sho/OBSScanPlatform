@@ -884,7 +884,7 @@ git commit -m "docs: document global bucket scan controls"
 
 Expected: documentation and repository handoff are committed.
 
-- [ ] **Step 8: Finish the branch and push**
+- [x] **Step 8: Finish the branch and push**
 
 Invoke `superpowers:finishing-a-development-branch`. The user previously selected keeping the feature branch and pushing it, so do not merge into `main` or `master` and do not delete the workspace.
 

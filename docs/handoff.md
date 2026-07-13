@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-`2026-07-13 21:17:41 +08:00` (Asia/Shanghai)
+`2026-07-13 21:20:56 +08:00` (Asia/Shanghai)
 
 ## Machine/environment
 
@@ -22,7 +22,8 @@
 - Immediate temp finalization: `6f36b29cda397a553ec2fbc5361ce5115864da5c`.
 - Operator docs/handoff: `0aa8e32d8828093442c8023d68bdd0a89ea73148`.
 - Broad-review fixes: `bedb5f335dea4828bd1dcb3bd27b0f93f360d57c`.
-- The final handoff commit follows `bedb5f3`; resolve its immutable hash with `git rev-parse HEAD`.
+- Verification/handoff refresh: `28d4f53ddde189cdba9ea6bd0da9d4fffac85c35`.
+- This final push-record commit follows `28d4f53`; resolve its immutable hash with `git rev-parse HEAD`.
 
 ## Summary of what changed
 
@@ -100,7 +101,12 @@ The warning is Starlette's `httpx` test-client deprecation warning.
 
 ## Uncommitted changes, if any
 
-This handoff refresh and plan completion tracking are expected to be committed before push. `.superpowers/sdd/` is ignored workflow state.
+None expected after this final push-record commit. `.superpowers/sdd/` is ignored workflow state.
+
+## Push status
+
+- First push succeeded: `ff5a051..28d4f53` to `origin/codex/obs-scan-platform`.
+- The final push-record commit must be pushed immediately after creation, then local and remote hashes must be compared.
 
 ## Exact resume instructions
 
