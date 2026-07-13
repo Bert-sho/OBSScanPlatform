@@ -122,7 +122,7 @@ Each successfully aggregated bucket writes one directory summary CSV, including 
 results/<run_id>/<appid>/<bucket>.csv
 ```
 
-The final bucket CSV contains directory-level rollups only. It does not store the full object file list. Per-object temporary CSV files are written under `results/<run_id>/_tmp/` while a bucket is being scanned and are removed after successful bucket scans when `scan.keep_temp_files` is `false`.
+The final bucket CSV contains directory-level rollups only. It does not store the full object file list. Per-object temporary CSV files are written under `results/<run_id>/_tmp/` while a bucket is being scanned. When `scan.keep_temp_files` is `false` (the default), temporary files are removed for `success`, `partial_failed`, and `failed` buckets; when it is `true`, temporary files are retained for every bucket status.
 
 Each run also writes:
 

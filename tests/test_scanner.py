@@ -1867,46 +1867,71 @@ async def test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elap
     assert "elapsed_seconds=" in finish_messages[0]
 
 
-def test_bucket_manifest_temp_dir_cleanup_and_retention(tmp_path: Path):
+@pytest.mark.parametrize("status", [ScanStatus.SUCCESS, ScanStatus.PARTIAL_FAILED, ScanStatus.FAILED])
+def test_bucket_manifest_deletes_temp_dir_for_every_status_when_retention_disabled(
+    tmp_path: Path,
+    status: ScanStatus,
+):
     scanner, _, bucket = make_scanner()
-    thresholds = scanner.config.defaults
-
-    success_delete_dir = tmp_path / "success-delete"
-    success_delete_dir.mkdir()
-    success_delete_result = BucketScanResult(
+    scanner.config.scan.keep_temp_files = False
+    temp_dir = tmp_path / status.value
+    temp_dir.mkdir()
+    result = BucketScanResult(
         appid="app.one",
         bucket_name=bucket.name,
         bucket_id=bucket.bucket_id,
-        status=ScanStatus.SUCCESS,
-        csv_path=tmp_path / "bucket.csv",
-        thresholds=thresholds,
+        status=status,
+        csv_path=None,
+        thresholds=scanner.config.defaults,
     )
-    manifest = scanner._bucket_result_to_manifest(success_delete_result, success_delete_dir)
-    assert not success_delete_dir.exists()
+
+    manifest = scanner._bucket_result_to_manifest(result, temp_dir)
+
+    assert not temp_dir.exists()
     assert "temp_dir" not in manifest
 
-    scanner.config.scan.keep_temp_files = True
-    success_keep_dir = tmp_path / "success-keep"
-    success_keep_dir.mkdir()
-    manifest = scanner._bucket_result_to_manifest(success_delete_result, success_keep_dir)
-    assert success_keep_dir.exists()
-    assert manifest["temp_dir"] == str(success_keep_dir)
 
+@pytest.mark.parametrize("status", [ScanStatus.SUCCESS, ScanStatus.PARTIAL_FAILED, ScanStatus.FAILED])
+def test_bucket_manifest_keeps_temp_dir_for_every_status_when_retention_enabled(
+    tmp_path: Path,
+    status: ScanStatus,
+):
+    scanner, _, bucket = make_scanner()
+    scanner.config.scan.keep_temp_files = True
+    temp_dir = tmp_path / status.value
+    temp_dir.mkdir()
+    result = BucketScanResult(
+        appid="app.one",
+        bucket_name=bucket.name,
+        bucket_id=bucket.bucket_id,
+        status=status,
+        csv_path=None,
+        thresholds=scanner.config.defaults,
+    )
+
+    manifest = scanner._bucket_result_to_manifest(result, temp_dir)
+
+    assert temp_dir.exists()
+    assert manifest["temp_dir"] == str(temp_dir)
+
+
+def test_bucket_manifest_ignores_missing_temp_dir_when_retention_disabled(tmp_path: Path):
+    scanner, _, bucket = make_scanner()
     scanner.config.scan.keep_temp_files = False
-    failed_keep_dir = tmp_path / "failed-keep"
-    failed_keep_dir.mkdir()
-    failed_result = BucketScanResult(
+    temp_dir = tmp_path / "missing"
+    result = BucketScanResult(
         appid="app.one",
         bucket_name=bucket.name,
         bucket_id=bucket.bucket_id,
         status=ScanStatus.FAILED,
         csv_path=None,
-        thresholds=thresholds,
-        error="boom",
+        thresholds=scanner.config.defaults,
     )
-    manifest = scanner._bucket_result_to_manifest(failed_result, failed_keep_dir)
-    assert failed_keep_dir.exists()
-    assert manifest["temp_dir"] == str(failed_keep_dir)
+
+    manifest = scanner._bucket_result_to_manifest(result, temp_dir)
+
+    assert not temp_dir.exists()
+    assert "temp_dir" not in manifest
 
 
 def detailed_request_error(endpoint: str, reason: str) -> OBSRequestError:

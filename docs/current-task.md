@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Align prefix task persistence and keep bucket scans running after metadata task failures
+Apply `_tmp` retention flag to every bucket status
 
 ## Current branch
 
@@ -10,65 +10,57 @@ Align prefix task persistence and keep bucket scans running after metadata task 
 
 ## Task status
 
-`wip`
+`completed`
 
 ## User goal
 
-1. Make the logged prefix progress total equal the number of prefix results returned by filelist discovery.
-2. Save intermediate CSV cache files per prefix task rather than per first-level directory prefix.
-3. Prevent an individual metadata task failure from terminating the bucket scan.
+Use the existing configuration flag to control temporary files consistently: `scan.keep_temp_files: false` deletes `_tmp` files for `success`, `partial_failed`, and `failed` buckets; `true` retains all of them.
 
 ## Completed work
 
-- Changed `FilelistDiscoveryScheduler.result()` to return every sorted, non-empty discovered prefix instead of collapsing nested prefixes to their first-level parent.
-- Kept the existing objectkeys queue and hashed `prefix_temp_filename()` scheme so each returned prefix has one progress task and its own temporary CSV.
-- Fixed child folder normalization when filelist returns a folder key equal to the current path, preventing duplicated paths such as `bravo/child/bravo/child/`.
-- Changed metadata workers to isolate any per-object `Exception`, record it in `PartialErrorSummary`, log a sanitized warning, continue remaining metadata objects, and proceed to objectkeys.
-- Deduplicated object rows by `object_key` at the aggregation boundary so overlapping recursive parent/child prefix responses do not inflate final directory totals.
-- Added a fallback bucket-level error summary for non-request partial failures.
-- Added regression coverage for nested prefix totals, one cache CSV per prefix, metadata continuation, bucket `partial_failed` status, and end-to-end per-prefix objectkeys calls.
-- Added the implementation plan at `docs/superpowers/plans/2026-07-13-prefix-task-and-metadata-resilience.md`.
+- Confirmed the existing `scan.keep_temp_files` flag and default `false` already exist.
+- Approved and committed the design specification.
+- Added a TDD regression matrix for all three terminal statuses and both flag values.
+- Added coverage for a missing temporary directory when retention is disabled.
+- Removed the bucket-status condition from `_bucket_result_to_manifest()` cleanup.
+- Updated README and the Chinese scan guide with the all-status semantics.
 
 ## Remaining work
 
-- Requested behavior is implemented. Repository status remains `wip` until the unrelated Windows regex validation failure is fixed or explicitly waived and the expanded suite is rerun.
+- None.
 
 ## Key files changed
 
-- `src/obs_scan_platform/filelist_discovery.py`
 - `src/obs_scan_platform/scanner.py`
-- `src/obs_scan_platform/aggregation.py`
-- `src/obs_scan_platform/models.py`
 - `tests/test_scanner.py`
-- `tests/test_scan_end_to_end.py`
-- `docs/superpowers/plans/2026-07-13-prefix-task-and-metadata-resilience.md`
+- `README.md`
+- `docs/scan-start-guide.md`
+- `docs/superpowers/specs/2026-07-13-temp-retention-flag-design.md`
+- `docs/superpowers/plans/2026-07-13-temp-retention-flag.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
 ```powershell
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py -k "recurses_to_filelist_depth_and_finds_nested_prefixes or bucket_uses_each_filelist_prefix_as_objectkeys_task or metadata_unexpected_exception or bucket_continues_to_objectkeys_after_metadata_task_failure" -q
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py tests/test_scan_end_to_end.py -q
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_aggregation.py tests/test_models.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_aggregation.py -k 'not rejects_unexpected_header' tests/test_models.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py -k 'bucket_manifest_' -q
 ```
 
 ## Validation result
 
-- RED run: 3 expected failures proved the old first-level prefix collapse and metadata exception propagation.
-- Focused GREEN run: `5 passed, 58 deselected`.
-- Pre-review relevant validation: `66 passed in 1.20s`.
-- Review regression GREEN: `2 passed in 0.59s`.
-- Expanded suite: `1 failed, 84 passed`; the failure is the pre-existing Windows regex issue in `tests/test_aggregation.py::test_iter_object_rows_rejects_unexpected_header` (`incomplete escape \U`).
-- Expanded task validation excluding that unrelated test: `84 passed, 1 deselected in 1.26s`.
+- Baseline: `75 passed in 1.29s`.
+- RED: `3 failed, 5 passed, 60 deselected`, proving failed/partial-failed cleanup and missing-directory manifest behavior were incorrect.
+- Focused GREEN: `8 passed, 60 deselected in 0.45s`.
+- Relevant suite after implementation: `81 passed in 1.26s`.
+- Independent review validation: `81 passed in 1.17s`; no code findings.
+- Final verification: `81 passed in 1.19s`.
 
 ## Known risks
 
-- Parent and child objectkeys responses may overlap; aggregation now deduplicates exact `object_key` matches. If the same key carries conflicting metadata across responses, the first deterministic temp-file row wins.
-- Non-request metadata exceptions appear in `partial_errors.samples` and the top-level summary, but only `OBSRequestError` instances produce detailed `errors` entries because that manifest schema requires request fields.
-- The bundled Python runtime was used because `pytest` is not on the shell `PATH`.
+- With the default `false`, diagnostic temporary CSVs from failed and partially failed buckets are now intentionally removed. Operators who need those files must set `keep_temp_files: true` before scanning.
+- Existing Windows-wide test portability failures from the previous task remain outside this change; task verification uses the scanner/config/end-to-end suites.
 
 ## Next recommended action
 
-Fix or separately waive the pre-existing Windows regex test, rerun the expanded suite, then mark this task completed. A representative live nested-prefix scan is also recommended.
+Use `keep_temp_files: true` for scans where failed-bucket diagnostic CSVs must be retained.

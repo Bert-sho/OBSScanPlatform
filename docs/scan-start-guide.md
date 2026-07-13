@@ -237,7 +237,7 @@ curl -o owned-bucket.csv \
 - `results/<run_id>/scan.log`：扫描日志，包含 filelist 进度，以及 objectkeys 前缀的 `completed` / `total` / `succeeded` / `failed` / `pages` / `objects` 进度。
 - `results/<run_id>/<appid>/<bucket>.csv`：每个桶一个目录级汇总 CSV。
 
-最终桶 CSV 只保存目录汇总信息，不保存完整文件清单。对象级临时 CSV 在扫描过程中写入 `results/<run_id>/_tmp/`，当 `scan.keep_temp_files` 为 `false` 且桶扫描成功时会自动清理。
+最终桶 CSV 只保存目录汇总信息，不保存完整文件清单。对象级临时 CSV 在扫描过程中写入 `results/<run_id>/_tmp/`。`scan.keep_temp_files` 默认为 `false`：无论桶最终为 `success`、`partial_failed` 还是 `failed`，都会删除对应临时目录；设为 `true` 时则保留所有状态的临时目录。
 
 如果桶为空，或桶内只有空文件夹，扫描仍会成功，并生成只有表头的桶 CSV。
 

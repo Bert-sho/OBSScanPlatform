@@ -867,7 +867,7 @@ class Scanner:
             manifest["partial_errors"] = result.partial_errors.to_manifest()
         if temp_dir is None:
             return manifest
-        if result.status == ScanStatus.SUCCESS and not self.config.scan.keep_temp_files:
+        if not self.config.scan.keep_temp_files:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
             return manifest
