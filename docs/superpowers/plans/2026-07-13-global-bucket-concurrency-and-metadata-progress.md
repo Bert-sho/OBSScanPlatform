@@ -339,10 +339,11 @@ async def test_metadata_logs_progress_for_success_failure_and_invalid_response(
         "metadata progress appid=app.one bucket=bucket-name-1 completed=1 total=3 succeeded=1 failed=0",
         "metadata object failure appid=app.one bucket=bucket-name-1 object_key=request-failed.txt error=OBS request failed endpoint=metadata status=503 reason=metadata unavailable",
         "metadata progress appid=app.one bucket=bucket-name-1 completed=2 total=3 succeeded=1 failed=1",
+        "metadata object failure appid=app.one bucket=bucket-name-1 object_key=invalid.txt error=invalid metadata response",
         "metadata progress appid=app.one bucket=bucket-name-1 completed=3 total=3 succeeded=1 failed=2",
         "metadata finish appid=app.one bucket=bucket-name-1 completed=3 total=3 succeeded=1 failed=2",
     ]
-    assert partial_errors.metadata_failed_files == 1
+    assert partial_errors.metadata_failed_files == 2
 
 
 @pytest.mark.asyncio
@@ -423,6 +424,17 @@ async def worker() -> None:
             if row is not None:
                 rows.append(row)
                 task_succeeded = True
+            else:
+                invalid_response = "invalid metadata response"
+                if partial_errors is not None:
+                    partial_errors.record("metadata", object_key, invalid_response, scope="object_key")
+                LOGGER.warning(
+                    "metadata object failure appid=%s bucket=%s object_key=%s error=%s",
+                    application.appid,
+                    bucket.name,
+                    object_key,
+                    invalid_response,
+                )
         except Exception as exc:
             if partial_errors is not None:
                 partial_errors.record("metadata", object_key, exc, scope="object_key")
@@ -699,7 +711,18 @@ async def scan_bucket_with_limit(bucket: BucketInfo) -> BucketScanResult:
 
         temp_dir = results_dir / self.config.scan.temp_subdir / application.appid / bucket.name
         if not self.config.scan.keep_temp_files and temp_dir.exists():
-            shutil.rmtree(temp_dir)
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as exc:
+                cleanup_error = f"cleanup failed: {_sanitize_reason(str(exc))}"
+                LOGGER.error(
+                    "bucket cleanup failure appid=%s bucket=%s error=%s",
+                    application.appid,
+                    bucket.name,
+                    cleanup_error,
+                )
+                error = f"{result.error}; {cleanup_error}" if result.error else cleanup_error
+                result = replace(result, status=ScanStatus.FAILED, error=error)
         return result
 ```
 
@@ -711,7 +734,7 @@ if temp_dir is not None and self.config.scan.keep_temp_files:
 return manifest
 ```
 
-Do not catch and suppress `shutil.rmtree` errors.
+Catch `shutil.rmtree` failures at the bucket-finalization boundary. Preserve the existing result fields and timings, set only the status to `failed`, append a sanitized cleanup reason to `error`, and return the result so application-level gather drains sibling buckets. Do not suppress the failure, retry deletion, or change CSV/manifest schemas.
 
 - [x] **Step 5: Extend the existing unexpected-bucket regression**
 

@@ -47,14 +47,14 @@ For each enabled application → each scan-capable bucket, the ordered flow is:
 
 ### Concurrency model
 Nested `asyncio.Semaphore` layers, all sourced from `ScanSettings`:
-- `app_concurrency` (Scanner.run) → `bucket_concurrency` (per app) → `global_request_concurrency` (the single `request_semaphore` created in `Scanner.__init__`, shared by every OBS HTTP call).
+- `bucket_concurrency` is the run-global bucket lifecycle limit shared across all applications; `global_request_concurrency` is the single `request_semaphore` created in `Scanner.__init__`, shared by every OBS HTTP call. Applications have no independent scan concurrency limit.
 - Within a bucket: `objectkeys_concurrency_per_bucket` and `metadata_concurrency_per_bucket` bound their own worker pools, but each request still passes through the global semaphore. `per_bucket_prefix_concurrency` is the legacy alias for `objectkeys_concurrency_per_bucket` (see `objectkeys_concurrency_limit()`).
 
 ### HTTP client (`obs_client.py`)
 `OBSClient.get_json` centralizes requests: exponential backoff retries, no retry on 4xx, and treats `success=false` with empty `objects`/`objectkeys` as a valid empty result for the `filelist`/`objectkeys` endpoints. Request bodies and object keys are base64-url encoded (`encode_request_body`, `encode_object_key`).
 
 ### Data model & aggregation (`models.py`, `paths.py`, `csv_store.py`, `aggregation.py`)
-Objects are written as temp per-object CSVs under `results/<run_id>/_tmp/<appid>/<bucket>/`. `aggregation.aggregate_bucket` reads them back, and `directory_chain_for_object` attributes each object to *every ancestor directory*, so `DirectoryStats` accumulate rollups (size, counts, large/empty/inactive flags via `Thresholds`) written to `results/<run_id>/<appid>/<bucket>.csv`. Temp files are deleted on bucket success unless `scan.keep_temp_files`. Status uses `_rollup_status` (`success`/`partial_failed`/`failed`); partial failures are collected in `PartialErrorSummary` and surfaced in `manifest.json`.
+Objects are written as temp per-object CSVs under `results/<run_id>/_tmp/<appid>/<bucket>/`. `aggregation.aggregate_bucket` reads them back, and `directory_chain_for_object` attributes each object to *every ancestor directory*, so `DirectoryStats` accumulate rollups (size, counts, large/empty/inactive flags via `Thresholds`) written to `results/<run_id>/<appid>/<bucket>.csv`. Unless `scan.keep_temp_files` is enabled, every bucket finalizes its temp directory immediately for `success`, `partial_failed`, and `failed` results while still holding its run-global bucket permit; a cleanup error converts that bucket result to `failed` without abandoning sibling scans. Status uses `_rollup_status` (`success`/`partial_failed`/`failed`); partial failures are collected in `PartialErrorSummary` and surfaced in `manifest.json`.
 
 ### Config (`config.py`)
 Single `AppConfigFile` loaded from YAML. `endpoint` is global or per-application. `thresholds_for` merges `defaults` with per-bucket `BucketOverrides` (a bucket may override e.g. `filelist_depth` without repeating other thresholds). `masked_dict` masks `apptoken` for API responses.

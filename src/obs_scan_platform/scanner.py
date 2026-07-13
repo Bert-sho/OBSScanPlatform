@@ -3,6 +3,7 @@ import json
 import logging
 import shutil
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -260,7 +261,18 @@ class Scanner:
 
                         temp_dir = results_dir / self.config.scan.temp_subdir / application.appid / bucket.name
                         if not self.config.scan.keep_temp_files and temp_dir.exists():
-                            shutil.rmtree(temp_dir)
+                            try:
+                                shutil.rmtree(temp_dir)
+                            except Exception as exc:
+                                cleanup_error = f"cleanup failed: {_sanitize_reason(str(exc))}"
+                                LOGGER.error(
+                                    "bucket cleanup failure appid=%s bucket=%s error=%s",
+                                    application.appid,
+                                    bucket.name,
+                                    cleanup_error,
+                                )
+                                error = f"{result.error}; {cleanup_error}" if result.error else cleanup_error
+                                result = replace(result, status=ScanStatus.FAILED, error=error)
                         return result
 
                 bucket_results = await asyncio.gather(*(scan_bucket_with_limit(bucket) for bucket in buckets))
@@ -707,6 +719,22 @@ class Scanner:
                     if row is not None:
                         rows.append(row)
                         task_succeeded = True
+                    else:
+                        invalid_response = "invalid metadata response"
+                        if partial_errors is not None:
+                            partial_errors.record(
+                                "metadata",
+                                object_key,
+                                invalid_response,
+                                scope="object_key",
+                            )
+                        LOGGER.warning(
+                            "metadata object failure appid=%s bucket=%s object_key=%s error=%s",
+                            application.appid,
+                            bucket.name,
+                            object_key,
+                            invalid_response,
+                        )
                 except Exception as exc:
                     if partial_errors is not None:
                         partial_errors.record("metadata", object_key, exc, scope="object_key")

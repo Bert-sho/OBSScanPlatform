@@ -4,6 +4,7 @@ import csv
 import json
 import inspect
 import logging
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1527,10 +1528,12 @@ async def test_metadata_logs_progress_for_success_failure_and_invalid_response(
         "metadata progress appid=app.one bucket=bucket-name-1 completed=1 total=3 succeeded=1 failed=0",
         "metadata object failure appid=app.one bucket=bucket-name-1 object_key=request-failed.txt error=OBS request failed endpoint=metadata status=503 reason=metadata unavailable",
         "metadata progress appid=app.one bucket=bucket-name-1 completed=2 total=3 succeeded=1 failed=1",
+        "metadata object failure appid=app.one bucket=bucket-name-1 object_key=invalid.txt error=invalid metadata response",
         "metadata progress appid=app.one bucket=bucket-name-1 completed=3 total=3 succeeded=1 failed=2",
         "metadata finish appid=app.one bucket=bucket-name-1 completed=3 total=3 succeeded=1 failed=2",
     ]
-    assert partial_errors.metadata_failed_files == 1
+    assert partial_errors.metadata_failed_files == 2
+    assert partial_errors.samples[1].reason == "invalid metadata response"
 
 
 @pytest.mark.asyncio
@@ -1914,6 +1917,42 @@ class UnexpectedMetadataBucketScanClient:
         raise AssertionError(endpoint)
 
 
+class InvalidMetadataBucketScanClient:
+    def __init__(self) -> None:
+        self.phase_events: list[str] = []
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        del url, headers
+        self.phase_events.append(endpoint)
+        if endpoint == "bucket_endpoint":
+            return {"result": "http://bucket-endpoint/"}
+        if endpoint == "filelist":
+            request_body = decode_request_body({"params": params})
+            if request_body["path"] == "/":
+                return {
+                    "result": {
+                        "files": [
+                            {"objectType": "folder", "objectKey": "alpha/"},
+                            {"objectType": "object", "objectKey": "invalid.txt"},
+                        ],
+                        "nextOffset": "",
+                    }
+                }
+            return {"result": {"files": [], "nextOffset": ""}}
+        if endpoint == "metadata":
+            return {"result": {"objectKey": {"objectKey": "invalid.txt"}}}
+        if endpoint == "objectkeys":
+            return {
+                "result": {
+                    "objectkeys": [
+                        {"objectKey": "alpha/file.txt", "size": "5", "lastModifyTime": "2000"}
+                    ],
+                    "truncated": "false",
+                }
+            }
+        raise AssertionError(endpoint)
+
+
 @pytest.mark.asyncio
 async def test_bucket_continues_to_objectkeys_after_metadata_task_failure(tmp_path: Path):
     scanner, application, bucket = make_scanner()
@@ -1923,6 +1962,24 @@ async def test_bucket_continues_to_objectkeys_after_metadata_task_failure(tmp_pa
 
     assert result.status == ScanStatus.PARTIAL_FAILED
     assert result.error == "1 failures; metadata=1; first: metadata target=bad.txt reason=metadata parser bug"
+    assert "objectkeys" in client.phase_events
+    assert result.csv_path is not None
+    assert result.csv_path.exists()
+    assert result.partial_errors is not None
+    assert result.partial_errors.to_manifest()["metadata_failed_files"] == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_metadata_marks_bucket_partial_failed_and_objectkeys_still_runs(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    client = InvalidMetadataBucketScanClient()
+
+    result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+
+    assert result.status == ScanStatus.PARTIAL_FAILED
+    assert result.error == (
+        "1 failures; metadata=1; first: metadata target=invalid.txt reason=invalid metadata response"
+    )
     assert "objectkeys" in client.phase_events
     assert result.csv_path is not None
     assert result.csv_path.exists()
@@ -2196,6 +2253,93 @@ async def test_finished_bucket_temp_dir_is_deleted_before_sibling_finishes(
 
     release_second.set()
     await application_task
+
+
+@pytest.mark.asyncio
+async def test_cleanup_failure_returns_failed_bucket_and_waits_for_sibling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, application, _ = make_scanner()
+    scanner.config.scan.keep_temp_files = False
+    cleanup_bucket = BucketInfo("cleanup-id", "cleanup", "HEC", "cn-east-3", "owner", None)
+    sibling_bucket = BucketInfo("sibling-id", "sibling", "HEC", "cn-east-3", "owner", None)
+    sibling_started = asyncio.Event()
+    release_sibling = asyncio.Event()
+
+    async def fake_list_buckets(app: ApplicationConfig, client: Any) -> list[BucketInfo]:
+        del app, client
+        return [cleanup_bucket, sibling_bucket]
+
+    async def fake_scan_bucket(
+        app: ApplicationConfig,
+        bucket: BucketInfo,
+        client: Any,
+        run_id: str,
+        results_dir: Path,
+        scan_started_ms: int,
+    ) -> BucketScanResult:
+        del client, run_id, scan_started_ms
+        temp_dir = results_dir / scanner.config.scan.temp_subdir / app.appid / bucket.name
+        temp_dir.mkdir(parents=True)
+        if bucket.name == "sibling":
+            sibling_started.set()
+            await release_sibling.wait()
+        return BucketScanResult(
+            appid=app.appid,
+            bucket_name=bucket.name,
+            bucket_id=bucket.bucket_id,
+            status=ScanStatus.SUCCESS,
+            csv_path=tmp_path / app.appid / f"{bucket.name}.csv",
+            thresholds=scanner.config.defaults,
+            error="existing warning" if bucket.name == "cleanup" else None,
+            elapsed_seconds=1.25,
+            request_elapsed_seconds=0.75,
+            processing_elapsed_seconds=0.5,
+        )
+
+    real_rmtree = shutil.rmtree
+
+    def fail_cleanup(path: Path) -> None:
+        if Path(path).name == "cleanup":
+            raise OSError("cleanup denied at https://obs.example/path?token=secret-token")
+        real_rmtree(path)
+
+    monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+    monkeypatch.setattr(scanner, "_scan_bucket", fake_scan_bucket)
+    monkeypatch.setattr("obs_scan_platform.scanner.shutil.rmtree", fail_cleanup)
+
+    application_task = asyncio.create_task(
+        scanner._scan_application(
+            application,
+            "run-1",
+            tmp_path,
+            scan_started_ms=1000,
+            bucket_semaphore=asyncio.Semaphore(2),
+        )
+    )
+    await sibling_started.wait()
+    for _ in range(10):
+        if application_task.done():
+            break
+        await asyncio.sleep(0)
+
+    assert not application_task.done()
+
+    release_sibling.set()
+    result = await application_task
+
+    assert result["status"] == ScanStatus.PARTIAL_FAILED.value
+    assert [bucket["bucket_name"] for bucket in result["buckets"]] == ["cleanup", "sibling"]
+    failed_bucket = result["buckets"][0]
+    assert failed_bucket["status"] == ScanStatus.FAILED.value
+    assert failed_bucket["csv_path"] == str(tmp_path / application.appid / "cleanup.csv")
+    assert failed_bucket["error"] == "existing warning; cleanup failed: cleanup denied at <redacted-url>"
+    assert failed_bucket["elapsed_seconds"] == 1.25
+    assert failed_bucket["request_elapsed_seconds"] == 0.75
+    assert failed_bucket["processing_elapsed_seconds"] == 0.5
+    assert "secret-token" not in failed_bucket["error"]
+    assert result["buckets"][1]["status"] == ScanStatus.SUCCESS.value
 
 
 @pytest.mark.parametrize("status", [ScanStatus.SUCCESS, ScanStatus.PARTIAL_FAILED, ScanStatus.FAILED])

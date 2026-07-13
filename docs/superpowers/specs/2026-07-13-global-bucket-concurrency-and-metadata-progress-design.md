@@ -85,7 +85,7 @@ Definitions:
 - `failed` increments for request failures, unexpected exceptions, or responses that do not produce a valid `ObjectRow`.
 - The invariant is `completed = succeeded + failed <= total`.
 
-Each task writes its progress line from its completion path, after its outcome is known. Existing per-object warning logs remain for failed tasks, and a failed metadata task does not cancel remaining metadata tasks or the following objectkeys stage.
+Each task writes its progress line from its completion path, after its outcome is known. Existing per-object warning logs remain for failed tasks. A response that does not produce a valid `ObjectRow` records `invalid metadata response` in `PartialErrorSummary` and emits the same sanitized per-object warning shape as an exception. A failed metadata task does not cancel remaining metadata tasks or the following objectkeys stage, and every recorded metadata failure contributes to the bucket's `partial_failed` status.
 
 For an empty task list, emit only:
 
@@ -106,7 +106,7 @@ After `_scan_bucket()` returns a `success`, `partial_failed`, or `failed` result
 
 Temporary-directory handling occurs before releasing the shared bucket permit. It no longer waits for other buckets in the application or other applications in the run.
 
-The existing filesystem-error policy is retained: a deletion failure is not silently reported as success. It is logged and allowed to surface through the existing scan failure boundary.
+A deletion failure is logged while the bucket permit is still held and converted into a failed result for that bucket. Existing result data and timings are preserved, and a sanitized cleanup reason is appended to any existing error text. The failed result is returned to application-level `asyncio.gather` so every sibling bucket drains before the application's client closes.
 
 Manifest conversion becomes serialization-only with respect to cleanup. It still includes `temp_dir` only when retention is enabled.
 
