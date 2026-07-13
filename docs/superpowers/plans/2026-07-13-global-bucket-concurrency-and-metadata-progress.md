@@ -816,11 +816,11 @@ python -m pytest -q
 
 Expected: all tests pass. Record the exact count and duration. Fix only failures caused by this task; document unrelated failures without hiding them.
 
-- [ ] **Step 3: Request code review**
+- [x] **Step 3: Request code review**
 
 Invoke `superpowers:requesting-code-review`. Review the complete range from `efad134` through the implementation HEAD against the design spec. Address verified findings with TDD and rerun affected tests.
 
-- [ ] **Step 4: Perform verification-before-completion**
+- [x] **Step 4: Perform verification-before-completion**
 
 Invoke `superpowers:verification-before-completion`, then freshly run:
 
