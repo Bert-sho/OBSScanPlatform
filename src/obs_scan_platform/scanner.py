@@ -225,7 +225,7 @@ class Scanner:
                         started_ms = _now_ms()
                         started_monotonic = time.monotonic()
                         try:
-                            return await self._scan_bucket(
+                            result = await self._scan_bucket(
                                 application,
                                 bucket,
                                 client,
@@ -241,7 +241,7 @@ class Scanner:
                                 application.appid,
                                 bucket.name,
                             )
-                            return BucketScanResult(
+                            result = BucketScanResult(
                                 appid=application.appid,
                                 bucket_name=bucket.name,
                                 bucket_id=bucket.bucket_id,
@@ -257,6 +257,11 @@ class Scanner:
                                 request_elapsed_seconds=elapsed_seconds,
                                 processing_elapsed_seconds=0.0,
                             )
+
+                        temp_dir = results_dir / self.config.scan.temp_subdir / application.appid / bucket.name
+                        if not self.config.scan.keep_temp_files and temp_dir.exists():
+                            shutil.rmtree(temp_dir)
+                        return result
 
                 bucket_results = await asyncio.gather(*(scan_bucket_with_limit(bucket) for bucket in buckets))
             except Exception as exc:
@@ -931,13 +936,8 @@ class Scanner:
         }
         if result.partial_errors is not None and result.partial_errors.has_errors():
             manifest["partial_errors"] = result.partial_errors.to_manifest()
-        if temp_dir is None:
-            return manifest
-        if not self.config.scan.keep_temp_files:
-            if temp_dir.exists():
-                shutil.rmtree(temp_dir)
-            return manifest
-        manifest["temp_dir"] = str(temp_dir)
+        if temp_dir is not None and self.config.scan.keep_temp_files:
+            manifest["temp_dir"] = str(temp_dir)
         return manifest
 
 

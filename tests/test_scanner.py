@@ -1193,8 +1193,10 @@ async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_fail
         results_dir: Path,
         scan_started_ms: int,
     ) -> BucketScanResult:
-        del app, client, run_id, results_dir, scan_started_ms
+        del client, run_id, scan_started_ms
         if bucket.name == "bad-bucket":
+            temp_dir = results_dir / scanner.config.scan.temp_subdir / app.appid / bucket.name
+            temp_dir.mkdir(parents=True)
             raise RuntimeError("unexpected bucket boom")
         return BucketScanResult(
             appid=application.appid,
@@ -1224,6 +1226,7 @@ async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_fail
     assert result["buckets"][0]["request_elapsed_seconds"] == result["buckets"][0]["elapsed_seconds"]
     assert result["buckets"][0]["processing_elapsed_seconds"] == 0.0
     assert result["buckets"][1]["status"] == ScanStatus.SUCCESS.value
+    assert not (tmp_path / scanner.config.scan.temp_subdir / application.appid / "bad-bucket").exists()
 
 
 @pytest.mark.asyncio
@@ -2087,28 +2090,112 @@ async def test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elap
     assert "elapsed_seconds=" in finish_messages[0]
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [ScanStatus.SUCCESS, ScanStatus.PARTIAL_FAILED, ScanStatus.FAILED])
-def test_bucket_manifest_deletes_temp_dir_for_every_status_when_retention_disabled(
+async def test_scan_application_deletes_each_bucket_temp_dir_after_final_result(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     status: ScanStatus,
 ):
-    scanner, _, bucket = make_scanner()
+    scanner, application, bucket = make_scanner()
     scanner.config.scan.keep_temp_files = False
-    temp_dir = tmp_path / status.value
-    temp_dir.mkdir()
-    result = BucketScanResult(
-        appid="app.one",
-        bucket_name=bucket.name,
-        bucket_id=bucket.bucket_id,
-        status=status,
-        csv_path=None,
-        thresholds=scanner.config.defaults,
+    temp_dir = tmp_path / scanner.config.scan.temp_subdir / application.appid / bucket.name
+
+    async def fake_list_buckets(app: ApplicationConfig, client: Any) -> list[BucketInfo]:
+        del app, client
+        return [bucket]
+
+    async def fake_scan_bucket(*args: Any, **kwargs: Any) -> BucketScanResult:
+        del args, kwargs
+        temp_dir.mkdir(parents=True)
+        (temp_dir / "objects.csv").write_text("data", encoding="utf-8")
+        return BucketScanResult(
+            appid=application.appid,
+            bucket_name=bucket.name,
+            bucket_id=bucket.bucket_id,
+            status=status,
+            csv_path=None,
+            thresholds=scanner.config.defaults,
+        )
+
+    monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+    monkeypatch.setattr(scanner, "_scan_bucket", fake_scan_bucket)
+
+    await scanner._scan_application(
+        application,
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+        bucket_semaphore=asyncio.Semaphore(1),
     )
 
-    manifest = scanner._bucket_result_to_manifest(result, temp_dir)
-
     assert not temp_dir.exists()
-    assert "temp_dir" not in manifest
+
+
+@pytest.mark.asyncio
+async def test_finished_bucket_temp_dir_is_deleted_before_sibling_finishes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, application, _ = make_scanner()
+    scanner.config.scan.keep_temp_files = False
+    first = BucketInfo("first-id", "first", "HEC", "cn-east-3", "owner", None)
+    second = BucketInfo("second-id", "second", "HEC", "cn-east-3", "owner", None)
+    first_returned = asyncio.Event()
+    release_second = asyncio.Event()
+
+    async def fake_list_buckets(app: ApplicationConfig, client: Any) -> list[BucketInfo]:
+        del app, client
+        return [first, second]
+
+    async def fake_scan_bucket(
+        app: ApplicationConfig,
+        bucket: BucketInfo,
+        client: Any,
+        run_id: str,
+        results_dir: Path,
+        scan_started_ms: int,
+    ) -> BucketScanResult:
+        del client, run_id, scan_started_ms
+        temp_dir = results_dir / scanner.config.scan.temp_subdir / app.appid / bucket.name
+        temp_dir.mkdir(parents=True)
+        if bucket.name == "first":
+            first_returned.set()
+        else:
+            await release_second.wait()
+        return BucketScanResult(
+            appid=app.appid,
+            bucket_name=bucket.name,
+            bucket_id=bucket.bucket_id,
+            status=ScanStatus.SUCCESS,
+            csv_path=None,
+            thresholds=scanner.config.defaults,
+        )
+
+    monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+    monkeypatch.setattr(scanner, "_scan_bucket", fake_scan_bucket)
+
+    application_task = asyncio.create_task(
+        scanner._scan_application(
+            application,
+            "run-1",
+            tmp_path,
+            scan_started_ms=1000,
+            bucket_semaphore=asyncio.Semaphore(2),
+        )
+    )
+    await first_returned.wait()
+    first_temp_dir = tmp_path / scanner.config.scan.temp_subdir / application.appid / "first"
+    for _ in range(10):
+        if not first_temp_dir.exists():
+            break
+        await asyncio.sleep(0)
+
+    assert not first_temp_dir.exists()
+    assert not application_task.done()
+
+    release_second.set()
+    await application_task
 
 
 @pytest.mark.parametrize("status", [ScanStatus.SUCCESS, ScanStatus.PARTIAL_FAILED, ScanStatus.FAILED])
@@ -2135,22 +2222,23 @@ def test_bucket_manifest_keeps_temp_dir_for_every_status_when_retention_enabled(
     assert manifest["temp_dir"] == str(temp_dir)
 
 
-def test_bucket_manifest_ignores_missing_temp_dir_when_retention_disabled(tmp_path: Path):
+def test_bucket_manifest_does_not_delete_temp_dir_when_retention_disabled(tmp_path: Path):
     scanner, _, bucket = make_scanner()
     scanner.config.scan.keep_temp_files = False
-    temp_dir = tmp_path / "missing"
+    temp_dir = tmp_path / "existing"
+    temp_dir.mkdir()
     result = BucketScanResult(
         appid="app.one",
         bucket_name=bucket.name,
         bucket_id=bucket.bucket_id,
-        status=ScanStatus.FAILED,
+        status=ScanStatus.SUCCESS,
         csv_path=None,
         thresholds=scanner.config.defaults,
     )
 
     manifest = scanner._bucket_result_to_manifest(result, temp_dir)
 
-    assert not temp_dir.exists()
+    assert temp_dir.exists()
     assert "temp_dir" not in manifest
 
 
