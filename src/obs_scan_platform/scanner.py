@@ -168,13 +168,20 @@ class Scanner:
             applications = [application for application in applications if application.appid == appid]
 
         LOGGER.info("scan start run_id=%s applications=%s", run_id, len(applications))
-        app_semaphore = asyncio.Semaphore(self.config.scan.app_concurrency)
+        bucket_semaphore = asyncio.Semaphore(self.config.scan.bucket_concurrency)
 
-        async def scan_with_limit(application: ApplicationConfig) -> dict[str, Any]:
-            async with app_semaphore:
-                return await self._scan_application(application, run_id, results_dir, started_ms)
-
-        app_entries = await asyncio.gather(*(scan_with_limit(application) for application in applications))
+        app_entries = await asyncio.gather(
+            *(
+                self._scan_application(
+                    application,
+                    run_id,
+                    results_dir,
+                    started_ms,
+                    bucket_semaphore,
+                )
+                for application in applications
+            )
+        )
         ended_ms = _now_ms()
         status = _rollup_status([entry["status"] for entry in app_entries])
 
@@ -199,6 +206,7 @@ class Scanner:
         run_id: str,
         results_dir: Path,
         scan_started_ms: int,
+        bucket_semaphore: asyncio.Semaphore,
     ) -> dict[str, Any]:
         LOGGER.info("application start appid=%s", application.appid)
         async with httpx.AsyncClient(timeout=self.config.scan.request_timeout_seconds) as http:
@@ -211,7 +219,6 @@ class Scanner:
             )
             try:
                 buckets = await self._list_buckets(application, client)
-                bucket_semaphore = asyncio.Semaphore(self.config.scan.bucket_concurrency)
 
                 async def scan_bucket_with_limit(bucket: BucketInfo) -> BucketScanResult:
                     async with bucket_semaphore:

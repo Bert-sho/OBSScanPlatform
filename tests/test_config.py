@@ -15,7 +15,6 @@ scan:
   temp_subdir: _tmp
   keep_temp_files: false
   page_size: 1000
-  app_concurrency: 2
   bucket_concurrency: 4
   global_request_concurrency: 50
   per_bucket_prefix_concurrency: 8
@@ -74,6 +73,33 @@ applications:
     assert config.scan.global_request_concurrency == 150
     assert config.scan.objectkeys_concurrency_limit() == 30
     assert config.scan.max_retries == 3
+
+
+def test_legacy_app_concurrency_is_ignored_and_omitted_from_modeled_config(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+scan:
+  app_concurrency: 1
+  bucket_concurrency: 3
+defaults:
+  large_directory_bytes: 100
+  large_file_bytes: 10
+  inactive_directory_days: 180
+applications:
+  - appid: app.one
+    name: App One
+    apptoken: replace-with-test-token
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+
+    assert config.scan.bucket_concurrency == 3
+    assert not hasattr(config.scan, "app_concurrency")
+    assert "app_concurrency" not in config.masked_dict()["scan"]
 
 
 def test_legacy_per_bucket_prefix_concurrency_still_sets_objectkeys_limit(tmp_path: Path):

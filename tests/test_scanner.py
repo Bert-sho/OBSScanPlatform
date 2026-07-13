@@ -243,6 +243,15 @@ def make_scanner() -> tuple[Scanner, ApplicationConfig, BucketInfo]:
     return Scanner(config), application, bucket
 
 
+def second_application() -> ApplicationConfig:
+    return ApplicationConfig(
+        appid="app.two",
+        name="App Two",
+        endpoint="http://app-two-obs.example",
+        apptoken="token-2",
+    )
+
+
 def test_rollup_status_handles_empty_success_failed_and_partial():
     assert _rollup_status([]) == ScanStatus.SUCCESS.value
     assert _rollup_status([ScanStatus.SUCCESS.value]) == ScanStatus.SUCCESS.value
@@ -1199,7 +1208,13 @@ async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_fail
     monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
     monkeypatch.setattr(scanner, "_scan_bucket", fake_scan_bucket)
 
-    result = await scanner._scan_application(application, "run-1", tmp_path, scan_started_ms=1000)
+    result = await scanner._scan_application(
+        application,
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+        bucket_semaphore=asyncio.Semaphore(scanner.config.scan.bucket_concurrency),
+    )
 
     assert result["status"] == ScanStatus.PARTIAL_FAILED.value
     assert [bucket["bucket_name"] for bucket in result["buckets"]] == ["bad-bucket", "good-bucket"]
@@ -1240,6 +1255,96 @@ async def test_run_keeps_other_applications_after_listbuckets_request_failure(
     assert manifest["applications"][0]["status"] == "failed"
     assert manifest["applications"][0]["buckets"] == []
     assert manifest["applications"][1]["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_run_applies_bucket_concurrency_globally_across_applications(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, first_application, _ = make_scanner()
+    scanner.config.applications = [first_application, second_application()]
+    scanner.config.scan.results_dir = str(tmp_path)
+    scanner.config.scan.bucket_concurrency = 1
+    active = 0
+    peak = 0
+
+    async def fake_list_buckets(application: ApplicationConfig, client: Any) -> list[BucketInfo]:
+        del client
+        return [
+            BucketInfo(
+                f"{application.appid}-id",
+                f"{application.appid}-bucket",
+                "HEC",
+                "cn-east-3",
+                "owner",
+                None,
+            )
+        ]
+
+    async def fake_scan_bucket(
+        application: ApplicationConfig,
+        bucket: BucketInfo,
+        client: Any,
+        run_id: str,
+        results_dir: Path,
+        scan_started_ms: int,
+    ) -> BucketScanResult:
+        nonlocal active, peak
+        del client, run_id, results_dir, scan_started_ms
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return BucketScanResult(
+            appid=application.appid,
+            bucket_name=bucket.name,
+            bucket_id=bucket.bucket_id,
+            status=ScanStatus.SUCCESS,
+            csv_path=None,
+            thresholds=scanner.config.defaults,
+        )
+
+    monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+    monkeypatch.setattr(scanner, "_scan_bucket", fake_scan_bucket)
+
+    manifest = await scanner.run(run_id="global-bucket-limit")
+
+    assert manifest["status"] == ScanStatus.SUCCESS.value
+    assert peak == 1
+
+
+@pytest.mark.asyncio
+async def test_run_starts_all_application_enumerations_without_app_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, first_application, _ = make_scanner()
+    scanner.config = AppConfigFile.model_validate(
+        {
+            "endpoint": "http://global-obs.example",
+            "scan": {"app_concurrency": 1, "results_dir": str(tmp_path)},
+            "defaults": scanner.config.defaults.model_dump(),
+            "applications": [first_application.model_dump(), second_application().model_dump()],
+        }
+    )
+    active = 0
+    peak = 0
+
+    async def fake_list_buckets(application: ApplicationConfig, client: Any) -> list[BucketInfo]:
+        nonlocal active, peak
+        del application, client
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return []
+
+    monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+
+    await scanner.run(run_id="unlimited-apps")
+
+    assert peak == 2
 
 
 @pytest.mark.asyncio

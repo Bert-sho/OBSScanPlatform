@@ -10,7 +10,6 @@ class ScanSettings(BaseModel):
     temp_subdir: str = "_tmp"
     keep_temp_files: bool = False
     page_size: int = 1000
-    app_concurrency: int = 2
     bucket_concurrency: int = 4
     global_request_concurrency: int = 150
     per_bucket_prefix_concurrency: int | None = None

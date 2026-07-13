@@ -5,7 +5,6 @@ scan:
   temp_subdir: _tmp
   keep_temp_files: false
   page_size: 1000
-  app_concurrency: 2
   bucket_concurrency: 4
   global_request_concurrency: 150
   objectkeys_concurrency_per_bucket: 30
