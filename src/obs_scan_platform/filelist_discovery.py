@@ -76,17 +76,10 @@ class FilelistDiscoveryScheduler:
         return True
 
     def result(self) -> RootDiscovery:
-        prefixes = self._top_level_prefixes(self._discovered_prefixes)
+        prefixes = sorted(self._discovered_prefixes)
         metadata_files = [
             object_key
             for object_key in self._direct_files
             if not any(object_key.startswith(prefix) for prefix in prefixes)
         ]
         return RootDiscovery(prefixes=prefixes, metadata_files=metadata_files)
-
-    def _top_level_prefixes(self, prefixes: set[str]) -> list[str]:
-        selected: list[str] = []
-        for prefix in sorted(prefixes):
-            if not any(prefix.startswith(parent) for parent in selected):
-                selected.append(prefix)
-        return selected

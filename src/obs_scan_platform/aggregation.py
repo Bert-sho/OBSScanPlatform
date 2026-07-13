@@ -50,7 +50,11 @@ def aggregate_bucket(
     scan_started_ms: int,
 ) -> int:
     stats_by_directory: dict[str, DirectoryStats] = {}
+    seen_object_keys: set[str] = set()
     for row in iter_object_rows(temp_dir):
+        if row.object_key in seen_object_keys:
+            continue
+        seen_object_keys.add(row.object_key)
         for directory in directory_chain_for_object(row.object_key):
             stats = stats_by_directory.setdefault(directory, DirectoryStats())
             stats.add_object(row, thresholds)

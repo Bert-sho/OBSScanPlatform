@@ -608,7 +608,7 @@ class Scanner:
         if not raw_prefix:
             return ""
         current_prefix = path.strip("/")
-        if current_prefix and not raw_prefix.startswith(f"{current_prefix}/"):
+        if current_prefix and raw_prefix != current_prefix and not raw_prefix.startswith(f"{current_prefix}/"):
             raw_prefix = f"{current_prefix}/{raw_prefix}"
         if path == "/" and "/" in raw_prefix:
             raw_prefix = raw_prefix.split("/", 1)[0]
@@ -661,7 +661,7 @@ class Scanner:
                     row = self._metadata_to_object_row(object_key, data)
                     if row is not None:
                         rows.append(row)
-                except OBSRequestError as exc:
+                except Exception as exc:
                     if partial_errors is not None:
                         partial_errors.record("metadata", object_key, exc, scope="object_key")
                     sanitized_error = _sanitize_reason(str(exc))

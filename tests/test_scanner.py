@@ -448,6 +448,73 @@ async def test_discover_root_uses_bucket_filelist_and_parses_first_level_items()
 
 
 @pytest.mark.asyncio
+async def test_bucket_uses_each_filelist_prefix_as_objectkeys_task(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    discovery = await scanner._discover_root(
+        application,
+        bucket,
+        FakeClient(
+            [
+                {
+                    "result": {
+                        "files": [{"objectType": "folder", "objectKey": "alpha/"}],
+                        "nextOffset": "",
+                    }
+                },
+                {
+                    "result": {
+                        "files": [{"objectType": "folder", "objectKey": "alpha/beta/"}],
+                        "nextOffset": "",
+                    }
+                },
+            ]
+        ),
+    )
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        await scanner._collect_prefixes(
+            application,
+            bucket,
+            "http://bucket-endpoint",
+            discovery.prefixes,
+            tmp_path,
+            FakeClient(
+                [
+                    {
+                        "result": {
+                            "objectkeys": [
+                                {"objectKey": "alpha/direct.txt", "size": "1", "lastModifyTime": "2000"}
+                            ],
+                            "truncated": "false",
+                        }
+                    },
+                    {
+                        "result": {
+                            "objectkeys": [
+                                {"objectKey": "alpha/beta/file.txt", "size": "2", "lastModifyTime": "2000"}
+                            ],
+                            "truncated": "false",
+                        }
+                    },
+                ]
+            ),
+        )
+
+    assert (tmp_path / prefix_temp_filename("alpha/")).exists()
+    assert (tmp_path / prefix_temp_filename("alpha/beta/")).exists()
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "objectkeys finish appid=app.one bucket=bucket-name-1 "
+        "completed=2 total=2 succeeded=2 failed=0 pages=2 objects=2" in message
+        for message in messages
+    )
+
+
+@pytest.mark.asyncio
 async def test_discover_root_parses_documented_objects_key():
     scanner, application, bucket = make_scanner()
     client = FakeClient(
@@ -523,7 +590,7 @@ async def test_discover_root_recurses_to_filelist_depth_and_finds_nested_prefixe
     discovery = await scanner._discover_root(application, bucket, client)
 
     assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/"]
-    assert discovery.prefixes == ["alpha/"]
+    assert discovery.prefixes == ["alpha/", "alpha/beta/"]
     assert discovery.root_files == ["root.txt"]
 
 
@@ -536,7 +603,7 @@ async def test_discover_root_records_child_filelist_failure_and_continues():
 
     discovery = await scanner._discover_root(application, bucket, client, partial_errors=partial_errors)
 
-    assert discovery.prefixes == ["alpha/", "bravo/"]
+    assert discovery.prefixes == ["alpha/", "bravo/", "bravo/child/"]
     assert partial_errors.to_manifest()["filelist_failed_dirs"] == 1
     assert partial_errors.to_manifest()["samples"][0]["target"] == "/alpha/"
     requested_paths = [decode_request_body(call)["path"] for call in client.calls]
@@ -554,7 +621,7 @@ async def test_discover_root_preserves_successful_child_filelist_pages_after_lat
 
     discovery = await scanner._discover_root(application, bucket, client, partial_errors=partial_errors)
 
-    assert discovery.prefixes == ["alpha/", "bravo/"]
+    assert discovery.prefixes == ["alpha/", "alpha/child/", "bravo/", "bravo/child/"]
     assert "alpha/page-one.txt" not in discovery.metadata_files
     manifest = partial_errors.to_manifest()
     assert manifest["filelist_failed_dirs"] == 1
@@ -749,7 +816,11 @@ async def test_discover_root_processes_whole_level_even_when_it_exceeds_task_lim
         "/dir-3/",
         "/dir-4/",
     ]
-    assert discovery.prefixes == [f"dir-{index}/" for index in range(5)]
+    assert discovery.prefixes == [
+        prefix
+        for index in range(5)
+        for prefix in (f"dir-{index}/", f"dir-{index}/child/")
+    ]
 
 
 @pytest.mark.asyncio
@@ -768,7 +839,7 @@ async def test_discover_root_schedules_deeper_level_when_current_level_keeps_tot
     discovery = await scanner._discover_root(application, bucket, client)
 
     assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/", "/alpha/beta/"]
-    assert discovery.prefixes == ["alpha/"]
+    assert discovery.prefixes == ["alpha/", "alpha/beta/"]
 
 
 @pytest.mark.asyncio
@@ -1282,7 +1353,14 @@ class ObjectkeysPaginatedPartialFailureClient:
 
 class UnexpectedMetadataClient:
     async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
-        raise RuntimeError("metadata parser bug")
+        object_key = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8").lstrip("/")
+        if object_key == "bad.txt":
+            raise RuntimeError("metadata parser bug")
+        return {
+            "result": {
+                "objectKey": {"objectKey": object_key, "size": "3", "lastModifyTime": "2000"}
+            }
+        }
 
 
 class UnexpectedObjectkeysClient:
@@ -1311,18 +1389,25 @@ class CancellingWorkerClient:
 
 
 @pytest.mark.asyncio
-async def test_metadata_unexpected_exception_propagates(tmp_path: Path):
+async def test_metadata_unexpected_exception_is_recorded_and_later_files_continue(tmp_path: Path):
     scanner, application, bucket = make_scanner()
-    with pytest.raises(RuntimeError, match="metadata parser bug"):
-        await scanner._collect_metadata_files(
-            application,
-            bucket,
-            "http://bucket-endpoint",
-            ["bad.txt"],
-            tmp_path,
-            UnexpectedMetadataClient(),
-            partial_errors=PartialErrorSummary(),
-        )
+    scanner.config.scan.metadata_concurrency_per_bucket = 1
+    partial_errors = PartialErrorSummary()
+
+    await scanner._collect_metadata_files(
+        application,
+        bucket,
+        "http://bucket-endpoint",
+        ["bad.txt", "good.txt"],
+        tmp_path,
+        UnexpectedMetadataClient(),
+        partial_errors=partial_errors,
+    )
+
+    rows = list(csv.DictReader((tmp_path / "metadata_files.csv").open(newline="", encoding="utf-8")))
+    assert [row["object_key"] for row in rows] == ["good.txt"]
+    assert partial_errors.to_manifest()["metadata_failed_files"] == 1
+    assert partial_errors.to_manifest()["samples"][0]["reason"] == "metadata parser bug"
 
 
 @pytest.mark.asyncio
@@ -1338,25 +1423,6 @@ async def test_objectkeys_unexpected_exception_propagates(tmp_path: Path):
             UnexpectedObjectkeysClient(),
             partial_errors=PartialErrorSummary(),
         )
-
-
-@pytest.mark.asyncio
-async def test_metadata_cancels_and_awaits_sibling_workers_after_unexpected_exception(tmp_path: Path):
-    scanner, application, bucket = make_scanner()
-    scanner.config.scan.metadata_concurrency_per_bucket = 2
-    client = CancellingWorkerClient(failure="metadata parser bug")
-
-    with pytest.raises(RuntimeError, match="metadata parser bug"):
-        await scanner._collect_metadata_files(
-            application,
-            bucket,
-            "http://bucket-endpoint",
-            ["bad.txt", "blocked.txt"],
-            tmp_path,
-            client,
-        )
-
-    assert client.cancellation_finished.is_set()
 
 
 @pytest.mark.asyncio
@@ -1625,6 +1691,57 @@ class PartialBucketScanClient:
                 }
             }
         raise AssertionError(endpoint)
+
+
+class UnexpectedMetadataBucketScanClient:
+    def __init__(self) -> None:
+        self.phase_events: list[str] = []
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        self.phase_events.append(endpoint)
+        if endpoint == "bucket_endpoint":
+            return {"result": "http://bucket-endpoint/"}
+        if endpoint == "filelist":
+            request_body = decode_request_body({"params": params})
+            if request_body["path"] == "/":
+                return {
+                    "result": {
+                        "files": [
+                            {"objectType": "folder", "objectKey": "alpha/"},
+                            {"objectType": "object", "objectKey": "bad.txt"},
+                        ],
+                        "nextOffset": "",
+                    }
+                }
+            return {"result": {"files": [], "nextOffset": ""}}
+        if endpoint == "metadata":
+            raise RuntimeError("metadata parser bug")
+        if endpoint == "objectkeys":
+            return {
+                "result": {
+                    "objectkeys": [
+                        {"objectKey": "alpha/file.txt", "size": "5", "lastModifyTime": "2000"}
+                    ],
+                    "truncated": "false",
+                }
+            }
+        raise AssertionError(endpoint)
+
+
+@pytest.mark.asyncio
+async def test_bucket_continues_to_objectkeys_after_metadata_task_failure(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    client = UnexpectedMetadataBucketScanClient()
+
+    result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+
+    assert result.status == ScanStatus.PARTIAL_FAILED
+    assert result.error == "1 failures; metadata=1; first: metadata target=bad.txt reason=metadata parser bug"
+    assert "objectkeys" in client.phase_events
+    assert result.csv_path is not None
+    assert result.csv_path.exists()
+    assert result.partial_errors is not None
+    assert result.partial_errors.to_manifest()["metadata_failed_files"] == 1
 
 
 @pytest.mark.asyncio

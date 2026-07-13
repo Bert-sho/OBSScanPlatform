@@ -2,14 +2,14 @@
 
 ## Timestamp
 
-2026-07-12 17:51:24 +08:00 (Asia/Shanghai)
+`2026-07-13 10:16:32 +08:00` (Asia/Shanghai)
 
 ## Machine/environment
 
-- Codex desktop app on Windows.
-- Worktree: `D:\code\OBSScanPlatform`
-- Branch: `codex/obs-scan-platform`
-- Python used for validation: `C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe`
+- Workspace: `D:\code\OBSScanPlatform`
+- OS/shell: Windows PowerShell
+- Test runtime: bundled Codex Python 3.12.13
+- Direct `pytest` command is unavailable on `PATH`; invoke pytest through the bundled Python path shown below.
 
 ## Current branch
 
@@ -17,119 +17,85 @@
 
 ## Latest commit before this session
 
-`45d59a01cc4106e4aa3f9b9926d66f1389a9b392` (`docs: record final OBS fallback validation`)
+`b7b9512282cf59a0091633697477f5880970f6ee` (`docs: track Claude coding guidance`)
 
 ## Latest commit after this session
 
-Pending until this handoff is committed. Resolve after commit with:
-
-```bash
-git rev-parse HEAD
-```
+The handoff is committed as the final session commit on this branch; use `git rev-parse HEAD` for its immutable hash.
 
 ## Summary of what changed
 
-- Fixed filelist discovery so object file entries returned as bare names from child directories are converted to bucket-relative full keys before they can enter `metadata_files`.
-- Added `_filelist_object_key(path, value)` in `src/obs_scan_platform/scanner.py`.
-- The metadata request path still adds the required leading slash when encoding `objectkey`, so a discovered `alpha/direct.txt` is sent to metadata as encoded `/alpha/direct.txt`.
-- Added regression coverage for a child `filelist` response returning `direct.txt`.
-- Added explicit coverage that an already complete child key such as `alpha/direct.txt` is preserved and not double-prefixed.
+- Removed first-level prefix collapsing from `FilelistDiscoveryScheduler.result()`. `RootDiscovery.prefixes` now contains the sorted complete set found by filelist.
+- Objectkeys progress therefore uses the complete prefix count, and `_collect_prefix()` writes each prefix to its own existing hashed CSV filename.
+- Corrected `_filelist_folder_prefix()` when a child response repeats the current full folder key, avoiding accidental self-prefix duplication.
+- Metadata workers now catch per-object `Exception`, record the failure, sanitize the warning, and continue. This keeps the bucket pipeline alive so objectkeys and aggregation still run and the bucket becomes `partial_failed`.
+- Aggregation now deduplicates exact object keys across per-prefix CSVs, preventing recursive parent/child API responses from double-counting final directory statistics.
+- Non-request partial failures now produce a concise bucket-level `error` summary from `PartialErrorSummary.samples`.
+- Updated unit and end-to-end tests for nested prefix tasks, log totals, cache files, metadata continuation, and bucket status.
 
 ## Important decisions and rationale
 
-- Fixed the issue at discovery time, where the bad value originated, instead of special-casing metadata requests.
-- Matched the existing folder-prefix normalization behavior to keep scanner path rules consistent.
-- Kept object rows and CSV output using slashless bucket-relative keys, preserving existing aggregation expectations.
-- Did not change objectkeys prefix request behavior; it already sends bucket paths with a leading slash and is unrelated to the metadata bare-file-name bug.
+- Interpreted “filelist task result count” literally as every non-empty prefix discovered by filelist, not only first-level parents.
+- Reused the existing `prefix_temp_filename(prefix)` implementation; it already produces deterministic, collision-resistant per-prefix files, so no new cache abstraction was needed.
+- Caught `Exception`, not `BaseException`, at the metadata item boundary. This isolates request, parse, and conversion failures while leaving cancellation/system-exit semantics untouched.
+- Kept every per-prefix cache intact and deduplicated only when aggregating, preserving diagnostic/task-level files while keeping final statistics correct.
+- Did not change filelist or objectkeys handling of unexpected exceptions; their existing cancel-sibling behavior remains in place.
 
 ## Failed attempts or rejected approaches
 
-- Direct `pytest` and `python -m pytest` were unavailable through the system PATH because WindowsApps Python is a placeholder. Used the Codex bundled Python runtime instead.
-- Full suite remains non-green on this Windows machine due to existing portability/environment issues, not this scanner change.
-- No broad refactor was done; the change is intentionally limited to filelist object key normalization and regression tests.
+- Initial direct `pytest` invocation failed because `pytest` was not on `PATH`; no dependency installation was performed.
+- One early test edit changed a neighboring assertion instead of the nested-prefix assertion; it was corrected before production verification.
+- The first full run hung in the obsolete metadata cancel-sibling test because its mock worker waits forever after ordinary exceptions became isolated. That old expectation was removed; the objectkeys cancel-sibling test remains.
+- Rejected adding a new cache layer because the existing per-prefix filename and append behavior already satisfy the requested persistence dimension once discovery stops collapsing prefixes.
+- Independent review found that recursive parent and child prefix responses could overlap. Restored that overlap in the end-to-end fixture, observed inflated counts, and fixed it at the aggregation boundary.
 
 ## Current test/build status
 
-TDD red test before implementation:
+Relevant suite passed:
 
-```text
-pytest tests/test_scanner.py::test_discover_root_joins_child_file_names_to_bucket_path -q
-FAILED: discovery.metadata_files was ["direct.txt"], proving the bare-name bug.
+```powershell
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py tests/test_scan_end_to_end.py -q
 ```
 
-Focused validation after implementation:
+Result: `66 passed in 1.20s`.
 
-```text
-pytest tests/test_scanner.py::test_discover_root_joins_child_file_names_to_bucket_path tests/test_scanner.py::test_discover_root_preserves_child_absolute_object_keys -q
-2 passed
+Expanded validation command:
+
+```powershell
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_aggregation.py tests/test_models.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
 ```
 
-Scanner validation:
+Result: `1 failed, 84 passed`. The failure is unrelated and pre-existing on Windows: `tests/test_aggregation.py::test_iter_object_rows_rejects_unexpected_header` passes an unescaped Windows path to `pytest.raises(match=...)`, so pytest 9 rejects the regex with `incomplete escape \U` before exercising production code.
 
-```text
-pytest tests/test_scanner.py -q
-61 passed
-```
+Task validation excluding that known unrelated test: `84 passed, 1 deselected in 1.26s`.
 
-End-to-end scan validation:
+Focused RED evidence before implementation:
 
-```text
-pytest tests/test_scan_end_to_end.py -q
-4 passed
-```
+- Nested cache file missing; objectkeys log showed `total=1`.
+- Metadata parser exception propagated from `_collect_metadata_files()`.
+- Bucket result was `failed` and objectkeys was not reached.
 
-Full Windows suite:
+Focused GREEN evidence after implementation: `5 passed, 58 deselected`.
 
-```text
-pytest -q
-139 passed, 6 failed, 1 warning
-```
-
-Known unrelated Windows failures:
-
-- `tests/test_aggregation.py::test_iter_object_rows_rejects_unexpected_header`: unescaped Windows path in pytest regex `match`.
-- `tests/test_api.py::test_runs_list_ignores_symlinked_external_run`: symlink privilege failure, `WinError 1314`.
-- `tests/test_api.py::test_runs_list_ignores_symlinked_external_manifest`: symlink privilege failure, `WinError 1314`.
-- `tests/test_api.py::test_bucket_csv_downloads_file`: expected LF but response text uses CRLF on Windows.
-- `tests/test_api.py::test_run_detail_rejects_backslash_segment`: Windows treats backslash as a path separator during test setup.
-- `tests/test_cli.py::test_scan_success_path`: assertion expects `config/apps.yaml`, while `WindowsPath` stringifies as `config\apps.yaml`.
-
-Code review:
-
-```text
-Subagent review found no correctness issues in src/obs_scan_platform/scanner.py or tests/test_scanner.py.
-```
-
-Diff hygiene:
-
-```text
-git diff --check
-Only LF-to-CRLF working-copy warnings for scanner.py and test_scanner.py.
-```
+Independent review regression evidence: parent/child overlap and metadata summary tests first failed, then passed (`2 passed in 0.59s`).
 
 ## Uncommitted changes, if any
 
-Before committing this handoff, expected changed files:
-
-- `src/obs_scan_platform/scanner.py`
-- `tests/test_scanner.py`
-- `docs/current-task.md`
-- `docs/handoff.md`
-
-Untracked existing user/workspace file remains:
-
-- `CLAUDE.md`
-
-Do not commit `CLAUDE.md` unless explicitly requested.
+None expected after the final commit. Confirm with `git status --short --branch`.
 
 ## Exact resume instructions for the next Codex session
 
-```bash
+```powershell
 cd D:\code\OBSScanPlatform
+git switch codex/obs-scan-platform
+git pull --ff-only
 git status --short --branch
-git log --oneline -5
-pytest tests/test_scanner.py -q
-pytest tests/test_scan_end_to_end.py -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py tests/test_scan_end_to_end.py -q
 ```
 
-If full Windows suite health is required, fix or skip the six listed portability failures in a separate task. Do not mark those failures as caused by the metadata objectkey change.
+Then run one representative live scan with nested prefixes and compare:
+
+1. filelist-discovered prefix count;
+2. `objectkeys start/finish ... total=N` in `scan.log`;
+3. the number of hashed CSV files under the bucket temp directory while `keep_temp_files: true`;
+4. whether parent and child prefix object rows overlap in the live API response.

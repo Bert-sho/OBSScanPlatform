@@ -119,7 +119,17 @@ class FakeOBSClient:
         if url.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
             assert params["bucketid"] == "owned-bucket"
             assert params["bucketld"] == "owned-id"
-            assert _decode_base64_text(params["objectkey"]) == "/alpha/"
+            prefix = _decode_base64_text(params["objectkey"])
+            if prefix == "/alpha/beta/":
+                return {
+                    "result": {
+                        "objectkeys": [
+                            {"objectKey": "alpha/beta/child.txt", "size": "7", "lastModifyTime": "3000"},
+                        ],
+                        "truncated": "false",
+                    }
+                }
+            assert prefix == "/alpha/"
             return {
                 "result": {
                     "objectkeys": [
@@ -430,7 +440,10 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
     assert any(url.startswith("https://global-obs-api.example/") for url in called_urls)
     assert all(call["params"].get("bucketid") != "shared-bucket" for call in fake_client.calls)
     objectkey_calls = [call for call in fake_client.calls if call["url"].endswith("/rest/boto3/s3/list/bucket/objectkeys")]
-    assert [_decode_base64_text(call["params"]["objectkey"]) for call in objectkey_calls] == ["/alpha/"]
+    assert [_decode_base64_text(call["params"]["objectkey"]) for call in objectkey_calls] == [
+        "/alpha/",
+        "/alpha/beta/",
+    ]
 
     csv_path = tmp_path / "results" / "run-1" / "app.one" / "owned-bucket.csv"
     assert manifest["status"] == "success"

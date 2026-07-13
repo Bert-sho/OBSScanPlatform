@@ -231,7 +231,19 @@ class PartialErrorSummary:
 
     def summary_text(self) -> str | None:
         if not self.errors:
-            return None
+            if not self.samples:
+                return None
+            counts = {
+                "filelist": self.filelist_failed_dirs,
+                "metadata": self.metadata_failed_files,
+                "objectkeys": self.objectkeys_failed_prefixes,
+            }
+            count_text = ", ".join(f"{endpoint}={count}" for endpoint, count in counts.items() if count)
+            first = self.samples[0]
+            return (
+                f"{sum(counts.values())} failures; {count_text}; first: {first.endpoint} "
+                f"target={first.target} reason={first.reason}"
+            )
         counts = Counter(detail.endpoint for detail in self.errors)
         count_text = ", ".join(f"{endpoint}={counts[endpoint]}" for endpoint in sorted(counts))
         first = self.errors[0]
