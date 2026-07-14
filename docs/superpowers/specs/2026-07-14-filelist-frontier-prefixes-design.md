@@ -33,6 +33,9 @@ for branches where a `filelist` request fails.
   `objectkeys` prefix.
 - A directory whose `filelist` request fails remains a final prefix so
   `objectkeys` can still attempt to cover its subtree.
+- When a directory fails after earlier pages discovered descendants, remove
+  those descendant candidates, queued tasks, and direct-file metadata
+  candidates. The failed directory becomes the boundary for that whole branch.
 - A confirmed empty directory is removed from the candidate set.
 - The root `/` is never an `objectkeys` prefix.
 
@@ -53,11 +56,11 @@ The existing per-prefix temporary CSV naming remains unchanged. Because final
 prefixes are non-overlapping, parent/child temporary CSV duplication and the
 associated duplicate request work are removed during normal successful
 traversal. Aggregation's exact-object-key deduplication remains as defensive
-protection for API anomalies and failure recovery overlap.
+protection for API anomalies.
 
 If a `filelist` task fails after returning earlier pages, its prefix remains in
-the frontier. Any rows also obtained through metadata or child prefixes are
-still safely deduplicated during aggregation.
+the frontier and its descendants are removed from pending discovery state, so
+the failed prefix is the only `objectkeys` boundary for that branch.
 
 ## Validation
 
@@ -67,8 +70,8 @@ Regression tests must prove:
   retained;
 - an unexpanded directory at the depth/task boundary is retained;
 - a failed expanded-directory request remains a final prefix;
+- descendants found before a later-page failure are not scanned separately;
 - an empty expanded directory is excluded;
 - objectkeys progress totals and temporary CSV files match only final frontier
   prefixes;
 - existing aggregation deduplication remains intact.
-

@@ -56,6 +56,8 @@ applications:
 
 `scan.filelist_task_limit_per_bucket` is a threshold for deciding whether to recurse into a deeper level. It does not truncate directory tasks already discovered for the current level.
 
+`objectkeys` scans only the non-overlapping frontier left by `filelist`: successfully expanded and empty directories are excluded, depth/task-limit boundary directories remain, and a failed directory becomes the boundary for its branch.
+
 Recommended request concurrency defaults:
 
 ```yaml

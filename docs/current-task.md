@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Global bucket concurrency, metadata progress, and immediate temp finalization
+Scan only the effective filelist frontier prefixes
 
 ## Current branch
 
@@ -12,76 +12,83 @@ Global bucket concurrency, metadata progress, and immediate temp finalization
 
 `wip`
 
-The requested implementation, reviews, task-relevant verification, commits, and push are complete. The complete Windows suite still has six accepted pre-existing failures, so repository policy prevents marking the task `completed`.
+The requested scan behavior is implemented, reviewed, and task-relevant tests
+pass. Repository policy prevents `completed` while the full Windows suite still
+contains the same six pre-existing platform failures.
 
 ## User goal
 
-- Remove independent application scan throttling while keeping legacy `app_concurrency` YAML loadable and ignored.
-- Enforce one `bucket_concurrency` limit across all applications for the complete bucket lifecycle.
-- Add per-bucket metadata task progress logs.
-- Finalize each bucket's temporary directory immediately after its result when `keep_temp_files=false`.
-- Continue sibling buckets safely when metadata work or temp cleanup fails.
+Ensure each bucket's `objectkeys` phase scans only the lowest effective
+directory level left by filelist traversal, without overlapping parent and
+child prefix tasks or duplicate temporary object rows caused by that overlap.
 
 ## Completed work
 
-- Committed the approved design (`efad134`) and implementation plan (`08d2abe`).
-- Removed application throttling and introduced one run-wide bucket semaphore (`c4b5a5e`).
-- Added metadata start/progress/finish/skipped logs (`e05b43d`).
-- Moved temp cleanup from manifest serialization into per-bucket finalization (`6f36b29`).
-- Updated operator documentation and the mandatory Git handoff (`0aa8e32`).
-- Addressed broad-review findings (`bedb5f3`): invalid metadata now contributes to partial failure, cleanup failures become failed bucket results while `gather` drains siblings, and current architecture/spec/plan documentation is aligned.
-- Completed four task-level reviews and a broad review/re-review. Final review reports no Critical, Important, or Minor findings and states `Ready to merge: Yes`.
+- Documented and approved the traversal-frontier design and implementation plan.
+- Added RED regression coverage for successful expansion, depth/task-limit
+  boundaries, empty directories, metadata candidates, objectkeys temp files,
+  and filelist failures after partial pagination.
+- Added `record_expanded()` so a successfully processed directory leaves the
+  final prefix candidate set.
+- Added `record_failed()` so a failed directory remains the frontier for its
+  branch while descendant prefixes, direct files, and queued descendant tasks
+  discovered on earlier pages are pruned.
+- Preserved metadata collection for direct files under successfully expanded
+  directories.
+- Updated end-to-end fixtures, README, and repository architecture guidance.
+- Completed an independent read-only review: Critical 0, Important 0, Minor 0,
+  `Ready: Yes`.
 
 ## Remaining work
 
-- No remaining work within the approved feature scope.
-- Separately fix or platform-condition the six pre-existing Windows-only tests before this task can be marked `completed` under repository policy.
+- No work remains within this task's functional scope.
+- The six unrelated Windows portability tests must be fixed or conditioned
+  separately before repository policy permits status `completed`.
 
 ## Key files changed
 
-- `config/apps.example.yaml`
-- `src/obs_scan_platform/config.py`
+- `src/obs_scan_platform/filelist_discovery.py`
 - `src/obs_scan_platform/scanner.py`
-- `tests/test_config.py`
 - `tests/test_scanner.py`
 - `tests/test_scan_end_to_end.py`
 - `README.md`
 - `CLAUDE.md`
-- `docs/scan-start-guide.md`
-- `docs/superpowers/specs/2026-07-13-global-bucket-concurrency-and-metadata-progress-design.md`
-- `docs/superpowers/plans/2026-07-13-global-bucket-concurrency-and-metadata-progress.md`
+- `docs/superpowers/specs/2026-07-14-filelist-frontier-prefixes-design.md`
+- `docs/superpowers/plans/2026-07-14-filelist-frontier-prefixes.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
 ```powershell
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py -k 'frontier or recurse or depth or task_limit or child_filelist_failure or metadata_files_not_covered or child_file_names or child_absolute or non_root_objects or documented_objects or capitalized_folder' -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_aggregation.py -q
 & 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest -q
 ```
 
-Task-specific RED/GREEN evidence is preserved in `.superpowers/sdd/` reports.
-
 ## Validation result
 
-- Fresh relevant scan suite after review fixes: `90 passed in 1.92s`.
-- Fresh complete suite after review fixes: `155 passed, 6 failed, 1 warning in 2.94s`.
-- The same six failures existed in the pre-task baseline (`147 passed, 6 failed, 1 warning in 2.97s`) and are unrelated to this task:
-  - unescaped Windows path used as a regex;
-  - two Windows symlink privilege failures;
-  - CRLF/LF response assertion difference;
-  - Windows backslash path semantics;
-  - Windows config-path rendering difference.
-- Broad re-review after `bedb5f3`: Critical `0`, Important `0`, Minor `0`, `Ready to merge: Yes`.
+- Frontier-focused GREEN: `10 passed, 66 deselected`.
+- Scanner and end-to-end suites: `80 passed`.
+- Aggregation suite: `9 passed, 1 failed`; the failure is the pre-existing
+  unescaped Windows temporary path used as a pytest regex.
+- Full suite: `155 passed, 6 failed, 1 warning`. The six failures match the
+  previous branch baseline: one Windows regex escape, two symlink privilege
+  errors, one CRLF/LF assertion, one backslash path-semantics case, and one
+  Windows config-path rendering assertion.
 
 ## Known risks
 
-- Without an application-level throttle, concurrent `listbuckets` calls can create request pressure up to `global_request_concurrency`.
-- A temp cleanup failure intentionally leaves the directory for diagnosis and marks that bucket failed; sibling buckets are still drained before the application client closes.
-- Invalid metadata responses now mark the bucket `partial_failed` while allowing later metadata tasks and objectkeys to continue.
-- Metadata progress records can interleave across buckets and must be grouped by `appid` and bucket.
-- The six pre-existing Windows failures mean the branch cannot be reported as fully passing on this machine.
+- A failed filelist directory intentionally becomes the objectkeys boundary for
+  its entire branch; this trades further filelist subdivision for complete,
+  non-overlapping fallback coverage.
+- Aggregation's exact-key deduplication remains as defensive protection for API
+  anomalies, but normal parent/child prefix overlap is removed before requests.
+- The complete suite cannot be reported green on this Windows environment until
+  the six unrelated portability failures are addressed.
 
 ## Next recommended action
 
-Track the unrelated Windows portability failures separately; keep this task `wip` until the full suite is green or repository policy is explicitly changed.
+Track and fix the six Windows portability tests as a separate task. No further
+scanner change is recommended for the frontier-prefix requirement.

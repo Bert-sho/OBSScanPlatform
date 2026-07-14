@@ -4,7 +4,7 @@
 
 **Goal:** Make objectkeys scan only the effective filelist traversal frontier, without overlapping parent and child prefix tasks.
 
-**Architecture:** `FilelistDiscoveryScheduler` keeps discovered folders as candidate final prefixes and removes a directory only after its own filelist traversal succeeds. Scanner signals successful expansion separately from generic task completion so failed directories remain recoverable objectkeys prefixes.
+**Architecture:** `FilelistDiscoveryScheduler` keeps discovered folders as candidate final prefixes and removes a directory only after its own filelist traversal succeeds. Scanner signals successful expansion separately from generic task completion; a failed directory stays as the branch boundary while its discovered descendants are pruned.
 
 **Tech Stack:** Python 3.11, asyncio, pytest
 
@@ -36,7 +36,9 @@ to expect one request and one child-prefix temporary CSV.
 - [ ] **Step 2: Add failed-directory frontier coverage**
 
 Ensure a directory whose own filelist request fails stays in
-`RootDiscovery.prefixes`, while successfully expanded parents do not.
+`RootDiscovery.prefixes`, while successfully expanded parents do not. For a
+later-page failure, assert that descendants discovered on earlier pages are not
+requested separately.
 
 - [ ] **Step 3: Run focused tests to verify RED**
 
@@ -58,7 +60,7 @@ discovered parent and child prefix.
 
 **Interfaces:**
 - Consumes: `FilelistTask`, folder discoveries, and successful/failed filelist completion
-- Produces: `FilelistDiscoveryScheduler.record_expanded(task: FilelistTask) -> None` and non-overlapping `RootDiscovery.prefixes`
+- Produces: `FilelistDiscoveryScheduler.record_expanded(task: FilelistTask) -> None`, `record_failed(task: FilelistTask) -> None`, and non-overlapping `RootDiscovery.prefixes`
 
 - [ ] **Step 1: Add successful-expansion transition**
 
@@ -70,6 +72,9 @@ candidate prefix set when the path is not root.
 In `_process_filelist_task`, call `record_expanded(task)` only after the request
 loop completes normally. Do not call it from the request-error handler. Keep
 `mark_completed(task)` in `finally` so progress remains accurate.
+
+On an `OBSRequestError`, call `record_failed(task)` to retain the failed prefix
+but remove its descendant prefixes, direct files, and queued tasks.
 
 - [ ] **Step 3: Run focused tests to verify GREEN**
 
@@ -118,4 +123,3 @@ Run `git status`, `git diff --stat`, and `git diff`; inspect for unrelated edits
 secrets, and machine-specific paths. Stage the intended files, commit with
 `fix: scan only filelist frontier prefixes`, then push with
 `git push -u origin HEAD`.
-

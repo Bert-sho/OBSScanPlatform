@@ -612,7 +612,9 @@ class Scanner:
                 if not next_pointer or next_pointer == pointer:
                     break
                 pointer = next_pointer
+            scheduler.record_expanded(task)
         except OBSRequestError as exc:
+            scheduler.record_failed(task)
             if partial_errors is not None:
                 partial_errors.record("filelist", path, exc, scope="directory")
             LOGGER.warning(

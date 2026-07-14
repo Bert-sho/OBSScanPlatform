@@ -453,12 +453,12 @@ async def test_discover_root_uses_bucket_filelist_and_parses_first_level_items()
     call = client.calls[0]
     assert call["url"].startswith("http://global-obs.example/")
     assert call["url"].endswith("/rest/s3/bucket/filelist")
-    assert discovery.prefixes == ["alpha/"]
+    assert discovery.prefixes == []
     assert discovery.root_files == ["root.txt"]
 
 
 @pytest.mark.asyncio
-async def test_bucket_uses_each_filelist_prefix_as_objectkeys_task(
+async def test_bucket_uses_only_filelist_frontier_as_objectkeys_tasks(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ):
@@ -497,14 +497,6 @@ async def test_bucket_uses_each_filelist_prefix_as_objectkeys_task(
                     {
                         "result": {
                             "objectkeys": [
-                                {"objectKey": "alpha/direct.txt", "size": "1", "lastModifyTime": "2000"}
-                            ],
-                            "truncated": "false",
-                        }
-                    },
-                    {
-                        "result": {
-                            "objectkeys": [
                                 {"objectKey": "alpha/beta/file.txt", "size": "2", "lastModifyTime": "2000"}
                             ],
                             "truncated": "false",
@@ -514,12 +506,12 @@ async def test_bucket_uses_each_filelist_prefix_as_objectkeys_task(
             ),
         )
 
-    assert (tmp_path / prefix_temp_filename("alpha/")).exists()
+    assert not (tmp_path / prefix_temp_filename("alpha/")).exists()
     assert (tmp_path / prefix_temp_filename("alpha/beta/")).exists()
     messages = [record.getMessage() for record in caplog.records]
     assert any(
         "objectkeys finish appid=app.one bucket=bucket-name-1 "
-        "completed=2 total=2 succeeded=2 failed=0 pages=2 objects=2" in message
+        "completed=1 total=1 succeeded=1 failed=0 pages=1 objects=1" in message
         for message in messages
     )
 
@@ -544,7 +536,7 @@ async def test_discover_root_parses_documented_objects_key():
 
     discovery = await scanner._discover_root(application, bucket, client)
 
-    assert discovery.prefixes == ["alpha/"]
+    assert discovery.prefixes == []
     assert discovery.root_files == ["root.txt"]
 
 
@@ -566,7 +558,7 @@ async def test_discover_root_treats_capitalized_folder_as_prefix():
 
     discovery = await scanner._discover_root(application, bucket, client)
 
-    assert discovery.prefixes == ["alpha/"]
+    assert discovery.prefixes == []
     assert discovery.root_files == []
 
 
@@ -600,8 +592,8 @@ async def test_discover_root_recurses_to_filelist_depth_and_finds_nested_prefixe
     discovery = await scanner._discover_root(application, bucket, client)
 
     assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/"]
-    assert discovery.prefixes == ["alpha/", "alpha/beta/"]
-    assert discovery.root_files == ["root.txt"]
+    assert discovery.prefixes == ["alpha/beta/"]
+    assert discovery.metadata_files == ["root.txt", "alpha/ignored.txt"]
 
 
 @pytest.mark.asyncio
@@ -613,7 +605,7 @@ async def test_discover_root_records_child_filelist_failure_and_continues():
 
     discovery = await scanner._discover_root(application, bucket, client, partial_errors=partial_errors)
 
-    assert discovery.prefixes == ["alpha/", "bravo/", "bravo/child/"]
+    assert discovery.prefixes == ["alpha/"]
     assert partial_errors.to_manifest()["filelist_failed_dirs"] == 1
     assert partial_errors.to_manifest()["samples"][0]["target"] == "/alpha/"
     requested_paths = [decode_request_body(call)["path"] for call in client.calls]
@@ -631,7 +623,7 @@ async def test_discover_root_preserves_successful_child_filelist_pages_after_lat
 
     discovery = await scanner._discover_root(application, bucket, client, partial_errors=partial_errors)
 
-    assert discovery.prefixes == ["alpha/", "alpha/child/", "bravo/", "bravo/child/"]
+    assert discovery.prefixes == ["alpha/"]
     assert "alpha/page-one.txt" not in discovery.metadata_files
     manifest = partial_errors.to_manifest()
     assert manifest["filelist_failed_dirs"] == 1
@@ -639,7 +631,7 @@ async def test_discover_root_preserves_successful_child_filelist_pages_after_lat
     requested_paths = [decode_request_body(call)["path"] for call in client.calls]
     assert "/alpha/" in requested_paths
     assert "/bravo/" in requested_paths
-    assert "/alpha/child/" in requested_paths
+    assert "/alpha/child/" not in requested_paths
     assert "/bravo/child/" in requested_paths
 
 
@@ -826,11 +818,7 @@ async def test_discover_root_processes_whole_level_even_when_it_exceeds_task_lim
         "/dir-3/",
         "/dir-4/",
     ]
-    assert discovery.prefixes == [
-        prefix
-        for index in range(5)
-        for prefix in (f"dir-{index}/", f"dir-{index}/child/")
-    ]
+    assert discovery.prefixes == [f"dir-{index}/child/" for index in range(5)]
 
 
 @pytest.mark.asyncio
@@ -849,7 +837,7 @@ async def test_discover_root_schedules_deeper_level_when_current_level_keeps_tot
     discovery = await scanner._discover_root(application, bucket, client)
 
     assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/", "/alpha/beta/"]
-    assert discovery.prefixes == ["alpha/", "alpha/beta/"]
+    assert discovery.prefixes == []
 
 
 @pytest.mark.asyncio
@@ -878,8 +866,8 @@ async def test_discover_root_returns_metadata_files_not_covered_by_objectkeys_pr
 
     discovery = await scanner._discover_root(application, bucket, client)
 
-    assert discovery.prefixes == ["alpha/"]
-    assert discovery.metadata_files == ["root.txt"]
+    assert discovery.prefixes == []
+    assert discovery.metadata_files == ["root.txt", "alpha/direct.txt"]
 
 
 @pytest.mark.asyncio
@@ -905,8 +893,8 @@ async def test_discover_root_joins_child_file_names_to_bucket_path():
 
     discovery = await scanner._discover_root(application, bucket, client)
 
-    assert discovery.prefixes == ["alpha/"]
-    assert discovery.metadata_files == []
+    assert discovery.prefixes == []
+    assert discovery.metadata_files == ["alpha/direct.txt"]
 
 
 @pytest.mark.asyncio
@@ -932,8 +920,8 @@ async def test_discover_root_preserves_child_absolute_object_keys():
 
     discovery = await scanner._discover_root(application, bucket, client)
 
-    assert discovery.prefixes == ["alpha/"]
-    assert discovery.metadata_files == []
+    assert discovery.prefixes == []
+    assert discovery.metadata_files == ["alpha/direct.txt"]
 
 
 @pytest.mark.asyncio
@@ -965,7 +953,7 @@ async def test_discover_root_reads_all_filelist_pages_for_each_directory():
 
 
 @pytest.mark.asyncio
-async def test_discover_root_does_not_return_non_root_objects_as_root_files():
+async def test_discover_root_returns_non_root_objects_as_metadata_files():
     scanner, application, bucket = make_scanner()
     scanner.config.defaults.filelist_depth = 2
     client = FakeClient(
@@ -987,8 +975,8 @@ async def test_discover_root_does_not_return_non_root_objects_as_root_files():
 
     discovery = await scanner._discover_root(application, bucket, client)
 
-    assert discovery.prefixes == ["alpha/"]
-    assert discovery.root_files == []
+    assert discovery.prefixes == []
+    assert discovery.metadata_files == ["alpha/not-root.txt"]
 
 
 @pytest.mark.asyncio
@@ -1836,13 +1824,14 @@ async def test_collect_prefixes_processes_all_prefixes_with_bounded_workers(tmp_
 @pytest.mark.asyncio
 async def test_scan_bucket_finishes_filelist_and_metadata_before_objectkeys(tmp_path: Path):
     scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 1
     scanner.config.scan.objectkeys_concurrency_per_bucket = 1
     client = PhaseOrderClient()
 
     result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
 
     assert result.status == ScanStatus.SUCCESS
-    assert client.phase_events == ["bucket_endpoint", "filelist", "filelist", "metadata", "objectkeys"]
+    assert client.phase_events == ["bucket_endpoint", "filelist", "metadata", "objectkeys"]
 
 
 class PartialBucketScanClient:
@@ -1956,6 +1945,7 @@ class InvalidMetadataBucketScanClient:
 @pytest.mark.asyncio
 async def test_bucket_continues_to_objectkeys_after_metadata_task_failure(tmp_path: Path):
     scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 1
     client = UnexpectedMetadataBucketScanClient()
 
     result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
@@ -1972,6 +1962,7 @@ async def test_bucket_continues_to_objectkeys_after_metadata_task_failure(tmp_pa
 @pytest.mark.asyncio
 async def test_invalid_metadata_marks_bucket_partial_failed_and_objectkeys_still_runs(tmp_path: Path):
     scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 1
     client = InvalidMetadataBucketScanClient()
 
     result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
@@ -1990,6 +1981,7 @@ async def test_invalid_metadata_marks_bucket_partial_failed_and_objectkeys_still
 @pytest.mark.asyncio
 async def test_scan_bucket_returns_partial_failed_with_csv_for_objectkeys_failure(tmp_path: Path):
     scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 1
     scanner.config.scan.objectkeys_concurrency_per_bucket = 1
 
     result = await scanner._scan_bucket(

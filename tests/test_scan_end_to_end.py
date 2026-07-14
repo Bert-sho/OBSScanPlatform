@@ -105,13 +105,14 @@ class FakeOBSClient:
         if url.endswith("/rest/boto3/s3/object/metadata"):
             assert params["bucketid"] == "owned-bucket"
             assert params["bucketld"] == "owned-id"
-            assert _decode_base64_text(params["objectkey"]) == "/root.txt"
+            object_key = _decode_base64_text(params["objectkey"]).lstrip("/")
+            assert object_key in {"root.txt", "alpha/direct.txt"}
             return {
                 "result": {
                     "objectKey": {
-                        "objectKey": "root.txt",
-                        "size": "12",
-                        "lastModifyTime": "1000",
+                        "objectKey": object_key,
+                        "size": "12" if object_key == "root.txt" else "5",
+                        "lastModifyTime": "1000" if object_key == "root.txt" else "2000",
                     }
                 }
             }
@@ -337,7 +338,13 @@ class PartialFailureOBSClient(FakeOBSClient):
                     exception_type="OBSBusinessError",
                     attempts=4,
                 )
-            return {"result": {"files": [], "nextOffset": ""}}
+            prefix = request_body["path"].strip("/")
+            return {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": f"{prefix}/leaf/"}],
+                    "nextOffset": "",
+                }
+            }
 
         if url.endswith("/rest/boto3/s3/object/metadata"):
             object_key = _decode_base64_text(params["objectkey"]).lstrip("/")
@@ -366,7 +373,7 @@ class PartialFailureOBSClient(FakeOBSClient):
 
         if url.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
             prefix = _decode_base64_text(params["objectkey"]).lstrip("/")
-            if prefix == "paged/" and params["nextmarker"] == "page-2":
+            if prefix == "paged/leaf/" and params["nextmarker"] == "page-2":
                 raise OBSRequestError(
                     endpoint="objectkeys",
                     status_code=503,
@@ -378,7 +385,7 @@ class PartialFailureOBSClient(FakeOBSClient):
                     exception_type="OBSBusinessError",
                     attempts=4,
                 )
-            if prefix == "paged/":
+            if prefix == "paged/leaf/":
                 return {
                     "result": {
                         "objectkeys": [
@@ -412,6 +419,7 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
             large_directory_bytes=10,
             large_file_bytes=10,
             inactive_directory_days=30,
+            filelist_depth=2,
         ),
         applications=[
             ApplicationConfig(
@@ -440,7 +448,6 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
     assert all(call["params"].get("bucketid") != "shared-bucket" for call in fake_client.calls)
     objectkey_calls = [call for call in fake_client.calls if call["url"].endswith("/rest/boto3/s3/list/bucket/objectkeys")]
     assert [_decode_base64_text(call["params"]["objectkey"]) for call in objectkey_calls] == [
-        "/alpha/",
         "/alpha/beta/",
     ]
 
@@ -455,7 +462,7 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
         "large_directory_bytes": 10,
         "large_file_bytes": 10,
         "inactive_directory_days": 30,
-        "filelist_depth": 5,
+        "filelist_depth": 2,
     }
     assert bucket_manifest["error"] is None
     assert bucket_manifest["errors"] == []
@@ -504,6 +511,7 @@ async def test_scanner_run_marks_bucket_partial_failed_and_keeps_csv(tmp_path: P
             large_directory_bytes=10,
             large_file_bytes=10,
             inactive_directory_days=30,
+            filelist_depth=2,
         ),
         applications=[ApplicationConfig(appid="app.one", name="App One", apptoken="token-1")],
     )
@@ -553,7 +561,7 @@ async def test_scanner_run_marks_bucket_partial_failed_and_keeps_csv(tmp_path: P
         "objectkeys": {
             "endpoint": "objectkeys",
             "scope": "prefix",
-            "scope_value": "paged/",
+            "scope_value": "paged/leaf/",
             "url": "https://owned-bucket.example/rest/boto3/s3/list/bucket/objectkeys?token=test-token",
             "status_code": 503,
             "reason": "next page unavailable",
@@ -636,6 +644,7 @@ async def test_scanner_run_includes_non_owner_shared_bucket_when_enabled(tmp_pat
             large_directory_bytes=10,
             large_file_bytes=10,
             inactive_directory_days=30,
+            filelist_depth=1,
         ),
         applications=[
             ApplicationConfig(
