@@ -200,8 +200,14 @@ class PhaseOrderClient:
 
 
 class MetadataLimitRollbackClient:
-    def __init__(self, filelist_results: dict[str, dict[str, Any] | Exception]):
+    def __init__(
+        self,
+        filelist_results: dict[str | tuple[str, str], dict[str, Any] | Exception],
+        filelist_delays: dict[str, float] | None = None,
+    ):
         self.filelist_results = filelist_results
+        self.filelist_delays = filelist_delays or {}
+        self.filelist_completions: list[str] = []
         self.phase_events: list[str] = []
         self.objectkeys_prefixes: list[str] = []
 
@@ -211,8 +217,17 @@ class MetadataLimitRollbackClient:
         if endpoint == "bucket_endpoint":
             return {"result": "http://bucket-endpoint/"}
         if endpoint == "filelist":
-            path = decode_request_body({"params": params})["path"]
-            result = self.filelist_results[path]
+            request_body = decode_request_body({"params": params})
+            path = request_body["path"]
+            if delay := self.filelist_delays.get(path):
+                await asyncio.sleep(delay)
+            self.filelist_completions.append(path)
+            page_key = (path, request_body["pointer"])
+            result = (
+                self.filelist_results[page_key]
+                if page_key in self.filelist_results
+                else self.filelist_results[path]
+            )
             if isinstance(result, Exception):
                 raise result
             return {"result": result}
@@ -1036,6 +1051,119 @@ async def test_discover_root_rollback_excludes_empty_prefix_and_logs(caplog: pyt
         "depth=2 metadata_tasks=2 limit=1 prefixes=1"
         for record in caplog.records
     )
+
+
+@pytest.mark.asyncio
+async def test_discover_root_empty_prefix_rollback_does_not_expose_covered_direct_files():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    scanner.config.scan.metadata_task_limit_per_bucket = 1
+    client = MetadataLimitRollbackClient(
+        {
+            "/": {
+                "files": [
+                    {"objectType": "folder", "objectKey": "alpha/"},
+                    {"objectType": "folder", "objectKey": "noisy/"},
+                    {"objectType": "object", "objectKey": "alpha/a.txt"},
+                    {"objectType": "object", "objectKey": "alpha/b.txt"},
+                ],
+                "nextOffset": "",
+            },
+            "/alpha/": {"files": [], "nextOffset": ""},
+            "/noisy/": {
+                "files": [
+                    {"objectType": "object", "objectKey": "noisy/one.txt"},
+                    {"objectType": "object", "objectKey": "noisy/two.txt"},
+                ],
+                "nextOffset": "",
+            },
+        }
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert discovery.prefixes == ["noisy/"]
+    assert discovery.metadata_files == []
+    assert len(discovery.metadata_files) <= scanner.config.scan.metadata_task_limit_per_bucket
+
+
+@pytest.mark.asyncio
+async def test_discover_root_metadata_overflow_rollback_is_deterministic_when_level_completes_out_of_order():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    scanner.config.scan.metadata_task_limit_per_bucket = 1
+    client = MetadataLimitRollbackClient(
+        {
+            "/": {
+                "files": [
+                    {"objectType": "object", "objectKey": "root.txt"},
+                    {"objectType": "folder", "objectKey": "alpha/"},
+                    {"objectType": "folder", "objectKey": "bravo/"},
+                ],
+                "nextOffset": "",
+            },
+            "/alpha/": {
+                "files": [{"objectType": "object", "objectKey": "alpha/file.txt"}],
+                "nextOffset": "",
+            },
+            "/bravo/": {
+                "files": [{"objectType": "object", "objectKey": "bravo/file.txt"}],
+                "nextOffset": "",
+            },
+        },
+        filelist_delays={"/alpha/": 0.02},
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert client.filelist_completions == ["/", "/bravo/", "/alpha/"]
+    assert discovery.prefixes == ["alpha/", "bravo/"]
+    assert discovery.metadata_files == ["root.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "terminal_page",
+    [
+        {"files": [], "nextOffset": ""},
+        {"objects": {}, "nextOffset": ""},
+    ],
+    ids=["empty-files", "empty-objects-map"],
+)
+async def test_discover_root_paginated_populated_directory_is_not_empty_on_empty_terminal_page(
+    terminal_page: dict[str, Any],
+):
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    scanner.config.scan.metadata_task_limit_per_bucket = 1
+    client = MetadataLimitRollbackClient(
+        {
+            "/": {
+                "files": [
+                    {"objectType": "folder", "objectKey": "alpha/"},
+                    {"objectType": "folder", "objectKey": "noisy/"},
+                ],
+                "nextOffset": "",
+            },
+            ("/alpha/", ""): {
+                "files": [{"objectType": "folder", "objectKey": "alpha/child/"}],
+                "nextOffset": "page-2",
+            },
+            ("/alpha/", "page-2"): terminal_page,
+            "/noisy/": {
+                "files": [
+                    {"objectType": "object", "objectKey": "noisy/one.txt"},
+                    {"objectType": "object", "objectKey": "noisy/two.txt"},
+                ],
+                "nextOffset": "",
+            },
+        }
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert discovery.prefixes == ["alpha/", "noisy/"]
+    assert discovery.metadata_files == []
 
 
 @pytest.mark.asyncio

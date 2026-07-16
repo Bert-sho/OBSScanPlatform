@@ -88,7 +88,13 @@ class FilelistDiscoveryScheduler:
     def record_empty(self, task: FilelistTask) -> None:
         prefix = task.path.strip("/")
         if prefix:
-            self._rollback_prefixes.discard(f"{prefix}/")
+            empty_prefix = f"{prefix}/"
+            self._rollback_prefixes.discard(empty_prefix)
+            self._rollback_direct_files = [
+                object_key
+                for object_key in self._rollback_direct_files
+                if not object_key.startswith(empty_prefix)
+            ]
         self.record_expanded(task)
 
     def record_expanded(self, task: FilelistTask) -> None:
