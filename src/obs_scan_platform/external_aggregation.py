@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
 
+from obs_scan_platform.config import Thresholds
+from obs_scan_platform.csv_store import iter_object_csv
+from obs_scan_platform.models import DirectoryStats
+from obs_scan_platform.paths import directory_chain_for_object
+
 
 SUMMARY_FIELDS = [
     "directory_path",
@@ -162,3 +167,66 @@ def reduce_summary_runs(
         current = next_round
         round_number += 1
     return current
+
+
+def summarize_object_csv(
+    source_path: Path,
+    output_path: Path,
+    *,
+    chunk_dir: Path,
+    max_directories_in_memory: int,
+    keep_intermediates: bool,
+    thresholds: Thresholds,
+    fan_in: int = MERGE_FAN_IN,
+) -> int:
+    if max_directories_in_memory < 1:
+        raise ValueError("max_directories_in_memory must be at least 1")
+
+    chunks: list[Path] = []
+    stats_by_directory: dict[str, DirectoryStats] = {}
+
+    def write_chunk() -> None:
+        chunk_path = chunk_dir / f"chunk-{len(chunks) + 1:06d}.csv"
+        write_summary_rows_atomic(
+            chunk_path,
+            (
+                DirectorySummary(
+                    directory_path=directory_path,
+                    object_count=stats_by_directory[directory_path].object_count,
+                    total_size_bytes=stats_by_directory[directory_path].total_size_bytes,
+                    max_file_size_bytes=stats_by_directory[directory_path].max_file_size_bytes,
+                    empty_file_count=stats_by_directory[directory_path].empty_file_count,
+                    large_file_count=stats_by_directory[directory_path].large_file_count,
+                    latest_modified_ms=stats_by_directory[directory_path].latest_modified_ms,
+                )
+                for directory_path in sorted(stats_by_directory)
+            ),
+        )
+        chunks.append(chunk_path)
+        stats_by_directory.clear()
+
+    for row in iter_object_csv(source_path):
+        for directory_path in directory_chain_for_object(row.object_key):
+            stats = stats_by_directory.setdefault(directory_path, DirectoryStats())
+            stats.add_object(row, thresholds)
+        if len(stats_by_directory) >= max_directories_in_memory:
+            write_chunk()
+
+    if stats_by_directory:
+        write_chunk()
+
+    reduced = reduce_summary_runs(
+        chunks,
+        chunk_dir,
+        keep_intermediates=keep_intermediates,
+        fan_in=fan_in,
+    )
+    merge_sorted_summaries(reduced, output_path, fan_in=fan_in)
+
+    if not keep_intermediates:
+        resolved_chunk_dir = chunk_dir.resolve()
+        for generated in {*chunks, *reduced}:
+            if generated.resolve().is_relative_to(resolved_chunk_dir):
+                generated.unlink(missing_ok=True)
+
+    return len(chunks)

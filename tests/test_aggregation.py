@@ -1,11 +1,12 @@
 import csv
+import re
 from pathlib import Path
 
 import pytest
 
 from obs_scan_platform.aggregation import FINAL_FIELDS, aggregate_bucket
 from obs_scan_platform.config import Thresholds
-from obs_scan_platform.csv_store import append_object_rows, iter_object_rows
+from obs_scan_platform.csv_store import append_object_rows, iter_object_csv, iter_object_rows
 from obs_scan_platform.models import ObjectRow
 
 
@@ -33,11 +34,34 @@ def test_object_rows_roundtrip_preserves_missing_last_modified(tmp_path: Path):
     ]
 
 
+def test_iter_object_csv_roundtrip(tmp_path: Path):
+    csv_path = tmp_path / "objects.csv"
+    rows = [ObjectRow("a.txt", 1, 1000), ObjectRow("nested/b.txt", 2, 2000)]
+    append_object_rows(csv_path, rows)
+
+    assert list(iter_object_csv(csv_path)) == rows
+
+
+def test_iter_object_csv_preserves_missing_last_modified(tmp_path: Path):
+    csv_path = tmp_path / "objects.csv"
+    append_object_rows(csv_path, [ObjectRow("a.txt", 1, None)])
+
+    assert list(iter_object_csv(csv_path)) == [ObjectRow("a.txt", 1, None)]
+
+
+def test_iter_object_csv_rejects_unexpected_header(tmp_path: Path):
+    csv_path = tmp_path / "bad.csv"
+    csv_path.write_text("name,size\nfile.txt,1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=re.escape(f"unexpected object CSV header in {csv_path}")):
+        list(iter_object_csv(csv_path))
+
+
 def test_iter_object_rows_rejects_unexpected_header(tmp_path: Path):
     csv_path = tmp_path / "bad.csv"
     csv_path.write_text("name,size\nfile.txt,1\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match=f"unexpected object CSV header in {csv_path}"):
+    with pytest.raises(ValueError, match=re.escape(f"unexpected object CSV header in {csv_path}")):
         list(iter_object_rows(tmp_path))
 
 

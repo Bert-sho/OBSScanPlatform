@@ -25,16 +25,20 @@ def append_object_rows(path: Path, rows: Iterable[ObjectRow]) -> None:
             )
 
 
+def iter_object_csv(path: Path):
+    with path.open(newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        if reader.fieldnames != OBJECT_ROW_FIELDS:
+            raise ValueError(f"unexpected object CSV header in {path}")
+        for row in reader:
+            last_modified = row["last_modified_ms"]
+            yield ObjectRow(
+                object_key=row["object_key"],
+                size_bytes=int(row["size_bytes"]),
+                last_modified_ms=int(last_modified) if last_modified else None,
+            )
+
+
 def iter_object_rows(temp_dir: Path):
     for csv_path in sorted(temp_dir.glob("*.csv")):
-        with csv_path.open(newline="", encoding="utf-8") as file:
-            reader = csv.DictReader(file)
-            if reader.fieldnames != OBJECT_ROW_FIELDS:
-                raise ValueError(f"unexpected object CSV header in {csv_path}")
-            for row in reader:
-                last_modified = row["last_modified_ms"]
-                yield ObjectRow(
-                    object_key=row["object_key"],
-                    size_bytes=int(row["size_bytes"]),
-                    last_modified_ms=int(last_modified) if last_modified else None,
-                )
+        yield from iter_object_csv(csv_path)
