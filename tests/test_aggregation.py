@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+import obs_scan_platform.aggregation as aggregation
+import obs_scan_platform.external_aggregation as external_aggregation
+
 from obs_scan_platform.aggregation import FINAL_FIELDS, aggregate_bucket
 from obs_scan_platform.config import Thresholds
 from obs_scan_platform.csv_store import append_object_rows, iter_object_csv, iter_object_rows
@@ -374,7 +377,7 @@ def test_aggregate_bucket_retains_chunks_source_summaries_and_multi_round_runs(t
     aggregation_dir = temp_dir / "_aggregation"
     assert len(list((aggregation_dir / "chunks").glob("*/*.csv"))) >= 5
     assert len(list((aggregation_dir / "prefixes").glob("*.csv"))) == 5
-    assert len(list((aggregation_dir / "bucket-runs").glob("*.csv"))) == 5
+    assert len(list((aggregation_dir / "bucket-runs").glob("*.csv"))) == 3
 
 
 def test_aggregate_bucket_removes_consumed_runs_but_keeps_detail_sources(tmp_path: Path):
@@ -406,6 +409,56 @@ def test_aggregate_bucket_removes_consumed_runs_but_keeps_detail_sources(tmp_pat
     assert all(source.exists() for source in detail_sources)
     assert len(list((temp_dir / "_aggregation" / "prefixes").glob("*.csv"))) == 5
     assert not list((temp_dir / "_aggregation" / "bucket-runs").glob("*.csv"))
+
+
+def test_aggregate_bucket_starts_bucket_merge_before_all_sources_are_summarized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    temp_dir = tmp_path / "_tmp"
+    for index in range(3):
+        append_object_rows(
+            temp_dir / f"source-{index}.csv",
+            [ObjectRow(f"dir-{index}/file.bin", 1, index)],
+        )
+
+    summarized_sources: list[Path] = []
+    source_counts_at_bucket_merge: list[int] = []
+    real_summarize = aggregation.summarize_object_csv
+    real_merge = external_aggregation.merge_sorted_summaries
+
+    def tracked_summarize(source_path, *args, **kwargs):
+        result = real_summarize(source_path, *args, **kwargs)
+        summarized_sources.append(source_path)
+        return result
+
+    def tracked_merge(inputs, output, fan_in=external_aggregation.MERGE_FAN_IN):
+        if output.parent.name == "bucket-runs":
+            source_counts_at_bucket_merge.append(len(summarized_sources))
+        real_merge(inputs, output, fan_in=fan_in)
+
+    monkeypatch.setattr(aggregation, "summarize_object_csv", tracked_summarize)
+    monkeypatch.setattr(external_aggregation, "merge_sorted_summaries", tracked_merge)
+
+    aggregate_bucket(
+        run_id="run-1",
+        appid="app.one",
+        bucket_name="bucket-a",
+        bucket_id="bucket-id",
+        temp_dir=temp_dir,
+        output_path=tmp_path / "bucket.csv",
+        thresholds=Thresholds(
+            large_directory_bytes=100,
+            large_file_bytes=100,
+            inactive_directory_days=1,
+        ),
+        scan_started_ms=1000,
+        max_directories_in_memory=1,
+        keep_temp_files=True,
+        merge_fan_in=2,
+    )
+
+    assert source_counts_at_bucket_merge[0] < len(summarized_sources)
 
 
 def test_aggregate_bucket_failure_preserves_old_output_and_removes_tmp(

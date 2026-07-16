@@ -277,10 +277,10 @@ def test_reduce_summary_runs_handles_multiple_rounds_and_deletes_only_consumed_g
 
     reduced = reduce_summary_runs(inputs, work_dir, keep_intermediates=False, fan_in=2)
 
-    assert reduced == [work_dir / "round-2-run-1.csv", work_dir / "round-2-run-2.csv"]
+    assert reduced == [inputs[-1], work_dir / "round-2-run-1.csv"]
     assert all(path.exists() for path in inputs)
     assert not any(work_dir.glob("round-1-run-*.csv"))
-    assert all(path.exists() for path in reduced)
+    assert list(work_dir.glob("*.csv")) == [work_dir / "round-2-run-1.csv"]
 
     output = tmp_path / "final.csv"
     merge_sorted_summaries(reduced, output, fan_in=2)
@@ -307,15 +307,43 @@ def test_reduce_summary_runs_retains_all_generated_runs_when_requested(tmp_path:
 
     reduced = reduce_summary_runs(inputs, work_dir, keep_intermediates=True, fan_in=2)
 
-    assert reduced == [work_dir / "round-2-run-1.csv", work_dir / "round-2-run-2.csv"]
+    assert reduced == [inputs[-1], work_dir / "round-2-run-1.csv"]
     assert sorted(path.name for path in work_dir.glob("*.csv")) == [
         "round-1-run-1.csv",
         "round-1-run-2.csv",
-        "round-1-run-3.csv",
         "round-2-run-1.csv",
-        "round-2-run-2.csv",
     ]
     assert all(path.exists() for path in inputs)
+
+
+def test_reduce_summary_runs_merges_before_input_iterable_is_exhausted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    events: list[str] = []
+    real_merge = external_aggregation.merge_sorted_summaries
+
+    def tracked_merge(inputs, output, fan_in=MERGE_FAN_IN):
+        events.append("merge")
+        real_merge(inputs, output, fan_in=fan_in)
+
+    def input_paths():
+        for index in range(3):
+            path = tmp_path / "source" / f"source-{index}.csv"
+            write_summary_rows_atomic(path, [_summary(f"/{index}/")])
+            events.append(f"yield-{index}")
+            yield path
+
+    monkeypatch.setattr(external_aggregation, "merge_sorted_summaries", tracked_merge)
+
+    reduce_summary_runs(
+        input_paths(),
+        tmp_path / "work",
+        keep_intermediates=True,
+        fan_in=2,
+    )
+
+    assert events.index("merge") < events.index("yield-2")
 
 
 def test_summarize_object_csv_chunks_and_rolls_up_in_lexical_order_with_retention(tmp_path: Path):
@@ -431,6 +459,43 @@ def test_summarize_object_csv_handles_500_nested_rows_with_bounded_chunks(tmp_pa
     assert rows[0].total_size_bytes == sum(range(1, 501))
     assert not list(chunk_dir.glob("*.csv"))
     assert not list(chunk_dir.glob("*.tmp"))
+
+
+def test_summarize_object_csv_starts_merging_before_all_chunks_are_created(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source = tmp_path / "objects.csv"
+    chunk_dir = tmp_path / "chunks"
+    append_object_rows(
+        source,
+        [ObjectRow(f"dir-{index}/file.bin", 1, index) for index in range(4)],
+    )
+    chunk_counts_at_merge: list[int] = []
+    real_merge = external_aggregation.merge_sorted_summaries
+
+    def tracked_merge(inputs, output, fan_in=MERGE_FAN_IN):
+        chunk_counts_at_merge.append(len(list(chunk_dir.glob("chunk-*.csv"))))
+        real_merge(inputs, output, fan_in=fan_in)
+
+    monkeypatch.setattr(external_aggregation, "merge_sorted_summaries", tracked_merge)
+
+    chunk_count = summarize_object_csv(
+        source,
+        tmp_path / "summary.csv",
+        chunk_dir=chunk_dir,
+        max_directories_in_memory=1,
+        keep_intermediates=True,
+        thresholds=Thresholds(
+            large_directory_bytes=100,
+            large_file_bytes=100,
+            inactive_directory_days=1,
+        ),
+        fan_in=2,
+    )
+
+    assert chunk_count == 4
+    assert chunk_counts_at_merge[0] < chunk_count
 
 
 def test_summarize_object_csv_writes_header_only_for_empty_source(tmp_path: Path):

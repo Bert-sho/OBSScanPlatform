@@ -6,7 +6,6 @@ from pathlib import Path
 from obs_scan_platform.config import Thresholds
 from obs_scan_platform.external_aggregation import (
     MERGE_FAN_IN,
-    DirectorySummary,
     iter_merged_summary_rows,
     reduce_summary_runs,
     summarize_object_csv,
@@ -49,7 +48,7 @@ def _inactive_days(scan_started_ms: int, latest_modified_ms: int | None) -> int 
 
 
 def _source_id(source_path: Path) -> str:
-    digest = hashlib.sha1(source_path.name.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1(source_path.name.encode("utf-8")).hexdigest()
     return f"{safe_filename(source_path.stem)[:80]}_{digest}"
 
 
@@ -70,51 +69,51 @@ def aggregate_bucket(
     if max_directories_in_memory < 1:
         raise ValueError("max_directories_in_memory must be at least 1")
 
-    sources = sorted(temp_dir.glob("*.csv"))
+    source_count = sum(1 for _ in temp_dir.glob("*.csv"))
     aggregation_dir = temp_dir / "_aggregation"
     chunks_dir = aggregation_dir / "chunks"
     prefixes_dir = aggregation_dir / "prefixes"
     bucket_runs_dir = aggregation_dir / "bucket-runs"
-    source_summaries: list[Path] = []
-
     LOGGER.info(
         "aggregation start appid=%s bucket=%s sources=%s directory_limit=%s",
         appid,
         bucket_name,
-        len(sources),
+        source_count,
         max_directories_in_memory,
     )
-    for completed, source in enumerate(sources, start=1):
-        source_id = _source_id(source)
-        summary_path = prefixes_dir / f"{source_id}.csv"
-        chunk_count = summarize_object_csv(
-            source,
-            summary_path,
-            chunk_dir=chunks_dir / source_id,
-            max_directories_in_memory=max_directories_in_memory,
-            keep_intermediates=keep_temp_files,
-            thresholds=thresholds,
-            fan_in=merge_fan_in,
-        )
-        source_summaries.append(summary_path)
-        LOGGER.info(
-            "aggregation source progress appid=%s bucket=%s completed=%s total=%s chunks=%s",
-            appid,
-            bucket_name,
-            completed,
-            len(sources),
-            chunk_count,
-        )
+
+    def source_summaries():
+        for completed, source in enumerate(temp_dir.glob("*.csv"), start=1):
+            source_id = _source_id(source)
+            summary_path = prefixes_dir / f"{source_id}.csv"
+            chunk_count = summarize_object_csv(
+                source,
+                summary_path,
+                chunk_dir=chunks_dir / source_id,
+                max_directories_in_memory=max_directories_in_memory,
+                keep_intermediates=keep_temp_files,
+                thresholds=thresholds,
+                fan_in=merge_fan_in,
+            )
+            LOGGER.info(
+                "aggregation source progress appid=%s bucket=%s completed=%s total=%s chunks=%s",
+                appid,
+                bucket_name,
+                completed,
+                source_count,
+                chunk_count,
+            )
+            yield summary_path
 
     LOGGER.info(
         "aggregation merge appid=%s bucket=%s inputs=%s fan_in=%s",
         appid,
         bucket_name,
-        len(source_summaries),
+        source_count,
         merge_fan_in,
     )
     reduced = reduce_summary_runs(
-        source_summaries,
+        source_summaries(),
         bucket_runs_dir,
         keep_intermediates=keep_temp_files,
         fan_in=merge_fan_in,
@@ -164,10 +163,8 @@ def aggregate_bucket(
         raise
 
     if not keep_temp_files:
-        resolved_bucket_runs_dir = bucket_runs_dir.resolve()
-        for run in reduced:
-            if run.resolve().is_relative_to(resolved_bucket_runs_dir):
-                run.unlink(missing_ok=True)
+        for run in bucket_runs_dir.rglob("*.csv"):
+            run.unlink(missing_ok=True)
 
     LOGGER.info(
         "aggregation finish appid=%s bucket=%s directories=%s",

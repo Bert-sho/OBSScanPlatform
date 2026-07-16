@@ -151,25 +151,73 @@ def reduce_summary_runs(
     if fan_in < 2:
         raise ValueError("fan_in must be at least 2")
 
-    current = list(inputs)
-    generated: set[Path] = set()
-    resolved_work_dir = work_dir.resolve()
-    round_number = 1
-    while len(current) > fan_in:
-        next_round: list[Path] = []
-        for run_index, start in enumerate(range(0, len(current), fan_in), start=1):
-            group = current[start : start + fan_in]
-            output = work_dir / f"round-{round_number}-run-{run_index}.csv"
-            merge_sorted_summaries(group, output, fan_in=fan_in)
-            if not keep_intermediates:
-                for consumed in group:
-                    if consumed in generated and consumed.resolve().is_relative_to(resolved_work_dir):
-                        consumed.unlink()
-            generated.add(output)
-            next_round.append(output)
-        current = next_round
-        round_number += 1
-    return current
+    reducer = _OnlineSummaryReducer(
+        work_dir,
+        keep_intermediates=keep_intermediates,
+        fan_in=fan_in,
+    )
+    for path in inputs:
+        reducer.add(path)
+    return reducer.finish()
+
+
+class _OnlineSummaryReducer:
+    def __init__(self, work_dir: Path, *, keep_intermediates: bool, fan_in: int) -> None:
+        self.work_dir = work_dir
+        self.keep_intermediates = keep_intermediates
+        self.fan_in = fan_in
+        self._levels: list[list[Path]] = []
+        self._run_counts: list[int] = []
+        self._resolved_work_dir = work_dir.resolve()
+
+    def add(self, path: Path) -> None:
+        self._add_at_level(path, 0)
+
+    def finish(self) -> list[Path]:
+        current = [path for level in self._levels for path in level]
+        finish_round = 1
+        while len(current) > self.fan_in:
+            next_round: list[Path] = []
+            for start in range(0, len(current), self.fan_in):
+                group = current[start : start + self.fan_in]
+                if len(group) == 1:
+                    next_round.append(group[0])
+                    continue
+                output = self.work_dir / (
+                    f"finish-{finish_round}-run-{len(next_round) + 1}.csv"
+                )
+                merge_sorted_summaries(group, output, fan_in=self.fan_in)
+                self._delete_consumed(group)
+                next_round.append(output)
+            current = next_round
+            finish_round += 1
+        return current
+
+    def _add_at_level(self, path: Path, level_number: int) -> None:
+        while len(self._levels) <= level_number:
+            self._levels.append([])
+            self._run_counts.append(0)
+
+        level = self._levels[level_number]
+        level.append(path)
+        if len(level) < self.fan_in:
+            return
+
+        group = tuple(level)
+        run_number = self._run_counts[level_number] + 1
+        output = self.work_dir / f"round-{level_number + 1}-run-{run_number}.csv"
+        merge_sorted_summaries(group, output, fan_in=self.fan_in)
+        level.clear()
+        self._run_counts[level_number] = run_number
+        self._delete_consumed(group)
+        self._add_at_level(output, level_number + 1)
+
+    def _delete_consumed(self, paths: Iterable[Path]) -> None:
+        if self.keep_intermediates:
+            return
+        for path in paths:
+            if path.resolve().is_relative_to(self._resolved_work_dir):
+                path.unlink(missing_ok=True)
 
 
 def summarize_object_csv(
@@ -185,41 +233,46 @@ def summarize_object_csv(
     if max_directories_in_memory < 1:
         raise ValueError("max_directories_in_memory must be at least 1")
 
-    chunks: list[Path] = []
-    stats_by_directory: dict[str, DirectoryStats] = {}
+    chunk_count = 0
 
-    def write_chunk() -> None:
-        chunk_path = chunk_dir / f"chunk-{len(chunks) + 1:06d}.csv"
-        write_summary_rows_atomic(
-            chunk_path,
-            (
-                DirectorySummary(
-                    directory_path=directory_path,
-                    object_count=stats_by_directory[directory_path].object_count,
-                    total_size_bytes=stats_by_directory[directory_path].total_size_bytes,
-                    max_file_size_bytes=stats_by_directory[directory_path].max_file_size_bytes,
-                    empty_file_count=stats_by_directory[directory_path].empty_file_count,
-                    large_file_count=stats_by_directory[directory_path].large_file_count,
-                    latest_modified_ms=stats_by_directory[directory_path].latest_modified_ms,
-                )
-                for directory_path in sorted(stats_by_directory)
-            ),
-        )
-        chunks.append(chunk_path)
-        stats_by_directory.clear()
+    def chunks() -> Iterator[Path]:
+        nonlocal chunk_count
+        stats_by_directory: dict[str, DirectoryStats] = {}
 
-    for row in iter_object_csv(source_path):
-        for directory_path in directory_chain_for_object(row.object_key):
-            stats = stats_by_directory.setdefault(directory_path, DirectoryStats())
-            stats.add_object(row, thresholds)
-        if len(stats_by_directory) >= max_directories_in_memory:
-            write_chunk()
+        def write_chunk() -> Path:
+            nonlocal chunk_count
+            chunk_count += 1
+            chunk_path = chunk_dir / f"chunk-{chunk_count:06d}.csv"
+            write_summary_rows_atomic(
+                chunk_path,
+                (
+                    DirectorySummary(
+                        directory_path=directory_path,
+                        object_count=stats_by_directory[directory_path].object_count,
+                        total_size_bytes=stats_by_directory[directory_path].total_size_bytes,
+                        max_file_size_bytes=stats_by_directory[directory_path].max_file_size_bytes,
+                        empty_file_count=stats_by_directory[directory_path].empty_file_count,
+                        large_file_count=stats_by_directory[directory_path].large_file_count,
+                        latest_modified_ms=stats_by_directory[directory_path].latest_modified_ms,
+                    )
+                    for directory_path in sorted(stats_by_directory)
+                ),
+            )
+            stats_by_directory.clear()
+            return chunk_path
 
-    if stats_by_directory:
-        write_chunk()
+        for row in iter_object_csv(source_path):
+            for directory_path in directory_chain_for_object(row.object_key):
+                stats = stats_by_directory.setdefault(directory_path, DirectoryStats())
+                stats.add_object(row, thresholds)
+            if len(stats_by_directory) >= max_directories_in_memory:
+                yield write_chunk()
+
+        if stats_by_directory:
+            yield write_chunk()
 
     reduced = reduce_summary_runs(
-        chunks,
+        chunks(),
         chunk_dir,
         keep_intermediates=keep_intermediates,
         fan_in=fan_in,
@@ -227,9 +280,9 @@ def summarize_object_csv(
     merge_sorted_summaries(reduced, output_path, fan_in=fan_in)
 
     if not keep_intermediates:
-        resolved_chunk_dir = chunk_dir.resolve()
-        for generated in {*chunks, *reduced}:
-            if generated.resolve().is_relative_to(resolved_chunk_dir):
+        resolved_output_path = output_path.resolve()
+        for generated in chunk_dir.rglob("*.csv"):
+            if generated.resolve() != resolved_output_path:
                 generated.unlink(missing_ok=True)
 
-    return len(chunks)
+    return chunk_count
