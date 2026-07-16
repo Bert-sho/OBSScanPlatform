@@ -73,6 +73,31 @@ applications:
     assert config.scan.global_request_concurrency == 150
     assert config.scan.objectkeys_concurrency_limit() == 30
     assert config.scan.max_retries == 3
+    assert config.scan.metadata_task_limit_per_bucket == 10000
+
+
+def test_load_config_sets_metadata_task_limit_per_bucket(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+scan:
+  metadata_task_limit_per_bucket: 4321
+defaults:
+  large_directory_bytes: 100
+  large_file_bytes: 10
+  inactive_directory_days: 180
+applications:
+  - appid: app.one
+    name: App One
+    apptoken: replace-with-test-token
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+
+    assert config.scan.metadata_task_limit_per_bucket == 4321
 
 
 def test_legacy_app_concurrency_is_ignored_and_omitted_from_modeled_config(tmp_path: Path):
