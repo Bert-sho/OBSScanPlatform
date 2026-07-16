@@ -2192,6 +2192,38 @@ async def test_scan_bucket_finishes_filelist_and_metadata_before_objectkeys(tmp_
     assert client.phase_events == ["bucket_endpoint", "filelist", "metadata", "objectkeys"]
 
 
+@pytest.mark.asyncio
+async def test_scan_bucket_passes_aggregation_memory_and_retention_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 1
+    scanner.config.scan.aggregation_max_directories_in_memory = 7
+    scanner.config.scan.keep_temp_files = True
+    calls: list[dict[str, Any]] = []
+
+    def capture_aggregate_bucket(**kwargs):
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr("obs_scan_platform.scanner.aggregate_bucket", capture_aggregate_bucket)
+
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        PhaseOrderClient(),
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+    )
+
+    assert result.status == ScanStatus.SUCCESS
+    assert len(calls) == 1
+    assert calls[0]["max_directories_in_memory"] == 7
+    assert calls[0]["keep_temp_files"] is True
+
+
 class PartialBucketScanClient:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []

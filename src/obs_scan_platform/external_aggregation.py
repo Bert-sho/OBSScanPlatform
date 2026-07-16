@@ -96,11 +96,10 @@ def write_summary_rows_atomic(path: Path, rows: Iterable[DirectorySummary]) -> N
         raise
 
 
-def merge_sorted_summaries(
+def iter_merged_summary_rows(
     inputs: Iterable[Path],
-    output: Path,
     fan_in: int = MERGE_FAN_IN,
-) -> None:
+) -> Iterator[DirectorySummary]:
     input_paths = list(inputs)
     if fan_in < 2:
         raise ValueError("fan_in must be at least 2")
@@ -108,8 +107,7 @@ def merge_sorted_summaries(
         raise ValueError("input count exceeds fan_in")
 
     iterators = [iter(iter_summary_rows(path)) for path in input_paths]
-
-    def merged_rows() -> Iterator[DirectorySummary]:
+    try:
         heap: list[tuple[str, int, DirectorySummary]] = []
         for index, rows in enumerate(iterators):
             row = next(rows, None)
@@ -129,14 +127,19 @@ def merge_sorted_summaries(
                 if next_row is not None:
                     heapq.heappush(heap, (next_row.directory_path, index, next_row))
             yield combined
-
-    try:
-        write_summary_rows_atomic(output, merged_rows())
     finally:
         for rows in iterators:
             close = getattr(rows, "close", None)
             if close is not None:
                 close()
+
+
+def merge_sorted_summaries(
+    inputs: Iterable[Path],
+    output: Path,
+    fan_in: int = MERGE_FAN_IN,
+) -> None:
+    write_summary_rows_atomic(output, iter_merged_summary_rows(inputs, fan_in=fan_in))
 
 
 def reduce_summary_runs(

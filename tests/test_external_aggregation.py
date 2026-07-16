@@ -133,6 +133,74 @@ def test_merge_sorted_summaries_writes_lexical_order_and_combines_equal_paths(tm
     assert rows[0].latest_modified_ms == 100
 
 
+def test_iter_merged_summary_rows_yields_lexical_order_and_combines_equal_paths(tmp_path: Path):
+    first = tmp_path / "first.csv"
+    second = tmp_path / "second.csv"
+    write_summary_rows_atomic(first, [_summary("/a/", total_size_bytes=3), _summary("/c/")])
+    write_summary_rows_atomic(
+        second,
+        [_summary("/a/", object_count=2, total_size_bytes=7, latest_modified_ms=100), _summary("/b/")],
+    )
+
+    rows = list(external_aggregation.iter_merged_summary_rows([first, second]))
+
+    assert [row.directory_path for row in rows] == ["/a/", "/b/", "/c/"]
+    assert rows[0] == _summary(
+        "/a/",
+        object_count=3,
+        total_size_bytes=10,
+        latest_modified_ms=100,
+    )
+
+
+def test_iter_merged_summary_rows_closes_all_inputs_on_success_and_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class TrackingIterator:
+        def __init__(self, first_row: DirectorySummary, *, fail: bool):
+            self.first_row = first_row
+            self.fail = fail
+            self.started = False
+            self.closed = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if not self.started:
+                self.started = True
+                return self.first_row
+            if self.fail:
+                raise RuntimeError("input iteration failed")
+            raise StopIteration
+
+        def close(self):
+            self.closed = True
+
+    paths = [tmp_path / "first.csv", tmp_path / "second.csv"]
+    success_iterators = [TrackingIterator(_summary("/a/"), fail=False), TrackingIterator(_summary("/b/"), fail=False)]
+    monkeypatch.setattr(
+        external_aggregation,
+        "iter_summary_rows",
+        dict(zip(paths, success_iterators, strict=True)).__getitem__,
+    )
+
+    assert [row.directory_path for row in external_aggregation.iter_merged_summary_rows(paths)] == ["/a/", "/b/"]
+    assert all(iterator.closed for iterator in success_iterators)
+
+    failing_iterators = [TrackingIterator(_summary("/a/"), fail=True), TrackingIterator(_summary("/b/"), fail=False)]
+    monkeypatch.setattr(
+        external_aggregation,
+        "iter_summary_rows",
+        dict(zip(paths, failing_iterators, strict=True)).__getitem__,
+    )
+
+    with pytest.raises(RuntimeError, match="input iteration failed"):
+        list(external_aggregation.iter_merged_summary_rows(paths))
+    assert all(iterator.closed for iterator in failing_iterators)
+
+
 def test_merge_sorted_summaries_writes_header_only_for_no_inputs(tmp_path: Path):
     output = tmp_path / "empty.csv"
 

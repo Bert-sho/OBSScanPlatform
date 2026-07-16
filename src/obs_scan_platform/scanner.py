@@ -391,6 +391,8 @@ class Scanner:
                 output_path=output_path,
                 thresholds=thresholds,
                 scan_started_ms=scan_started_ms,
+                max_directories_in_memory=self.config.scan.aggregation_max_directories_in_memory,
+                keep_temp_files=self.config.scan.keep_temp_files,
             )
         except OBSRequestError as exc:
             ended_ms = _now_ms()

@@ -1,4 +1,5 @@
 import csv
+import logging
 import re
 from pathlib import Path
 
@@ -91,6 +92,8 @@ def test_aggregate_bucket_rolls_objects_to_parents(tmp_path: Path):
             inactive_directory_days=1,
         ),
         scan_started_ms=3_600_000 * 24 * 10,
+        max_directories_in_memory=100,
+        keep_temp_files=False,
     )
 
     rows = {row["directory_path"]: row for row in csv.DictReader(output.open())}
@@ -119,21 +122,30 @@ def test_aggregate_bucket_writes_exact_final_header(tmp_path: Path):
             inactive_directory_days=1,
         ),
         scan_started_ms=1000,
+        max_directories_in_memory=100,
+        keep_temp_files=False,
     )
 
     with output.open(newline="", encoding="utf-8") as file:
         assert next(csv.reader(file)) == FINAL_FIELDS
 
 
-def test_aggregate_bucket_writes_header_only_when_temp_dir_is_missing(tmp_path: Path):
+@pytest.mark.parametrize("create_temp_dir", [False, True])
+def test_aggregate_bucket_writes_header_only_when_temp_dir_is_missing_or_empty(
+    tmp_path: Path,
+    create_temp_dir: bool,
+):
     output = tmp_path / "bucket.csv"
+    temp_dir = tmp_path / "temp"
+    if create_temp_dir:
+        temp_dir.mkdir()
 
     row_count = aggregate_bucket(
         run_id="run-1",
         appid="app.one",
         bucket_name="bucket-a",
         bucket_id="bucket-id",
-        temp_dir=tmp_path / "missing-temp",
+        temp_dir=temp_dir,
         output_path=output,
         thresholds=Thresholds(
             large_directory_bytes=20,
@@ -141,6 +153,8 @@ def test_aggregate_bucket_writes_header_only_when_temp_dir_is_missing(tmp_path: 
             inactive_directory_days=1,
         ),
         scan_started_ms=1000,
+        max_directories_in_memory=100,
+        keep_temp_files=False,
     )
 
     assert row_count == 0
@@ -166,6 +180,8 @@ def test_aggregate_bucket_writes_lowercase_bool_values(tmp_path: Path):
             inactive_directory_days=1,
         ),
         scan_started_ms=1000,
+        max_directories_in_memory=100,
+        keep_temp_files=False,
     )
 
     row = next(csv.DictReader(output.open(newline="", encoding="utf-8")))
@@ -193,6 +209,8 @@ def test_aggregate_bucket_leaves_inactive_fields_empty_without_last_modified(tmp
             inactive_directory_days=1,
         ),
         scan_started_ms=86_400_000,
+        max_directories_in_memory=100,
+        keep_temp_files=False,
     )
 
     row = next(csv.DictReader(output.open(newline="", encoding="utf-8")))
@@ -219,6 +237,8 @@ def test_aggregate_bucket_marks_old_directory_inactive(tmp_path: Path):
             inactive_directory_days=1,
         ),
         scan_started_ms=86_400_000,
+        max_directories_in_memory=100,
+        keep_temp_files=False,
     )
 
     row = next(csv.DictReader(output.open(newline="", encoding="utf-8")))
@@ -245,6 +265,8 @@ def test_aggregate_bucket_overwrites_existing_output_and_removes_tmp(tmp_path: P
             inactive_directory_days=1,
         ),
         scan_started_ms=1000,
+        max_directories_in_memory=100,
+        keep_temp_files=False,
     )
 
     rows = list(csv.DictReader(output.open(newline="", encoding="utf-8")))
@@ -269,4 +291,155 @@ def test_aggregate_bucket_overwrites_existing_output_and_removes_tmp(tmp_path: P
             "is_inactive_directory": "false",
         }
     ]
+    assert not output.with_suffix(output.suffix + ".tmp").exists()
+
+
+def test_aggregate_bucket_merges_multiple_sources_without_dedup_and_logs_progress(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    temp_dir = tmp_path / "_tmp"
+    append_object_rows(
+        temp_dir / "prefix.csv",
+        [ObjectRow("shared/prefix.bin", 7, 100), ObjectRow("duplicate.bin", 3, 200)],
+    )
+    append_object_rows(
+        temp_dir / "metadata_files.csv",
+        [ObjectRow("shared/metadata.bin", 11, 300), ObjectRow("duplicate.bin", 3, 200)],
+    )
+    output = tmp_path / "bucket.csv"
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.aggregation"):
+        count = aggregate_bucket(
+            run_id="run-1",
+            appid="app.one",
+            bucket_name="bucket-a",
+            bucket_id="bucket-id",
+            temp_dir=temp_dir,
+            output_path=output,
+            thresholds=Thresholds(
+                large_directory_bytes=20,
+                large_file_bytes=10,
+                inactive_directory_days=1,
+            ),
+            scan_started_ms=400,
+            max_directories_in_memory=2,
+            keep_temp_files=False,
+            merge_fan_in=2,
+        )
+
+    with output.open(newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        rows = list(reader)
+        assert reader.fieldnames == FINAL_FIELDS
+    assert count == 2
+    assert [row["directory_path"] for row in rows] == ["/", "/shared/"]
+    assert rows[0]["object_count"] == "4"
+    assert rows[0]["total_size_bytes"] == "24"
+    assert rows[1]["object_count"] == "2"
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(message.startswith("aggregation start appid=app.one bucket=bucket-a sources=2 directory_limit=2") for message in messages)
+    assert sum(message.startswith("aggregation source progress appid=app.one bucket=bucket-a") for message in messages) == 2
+    assert any(message.startswith("aggregation merge appid=app.one bucket=bucket-a inputs=2 fan_in=2") for message in messages)
+    assert any(message.startswith("aggregation finish appid=app.one bucket=bucket-a directories=2") for message in messages)
+    assert all("duplicate.bin" not in message and str(temp_dir) not in message for message in messages)
+
+
+def test_aggregate_bucket_retains_chunks_source_summaries_and_multi_round_runs(tmp_path: Path):
+    temp_dir = tmp_path / "_tmp"
+    for index in range(5):
+        append_object_rows(
+            temp_dir / f"source-{index}.csv",
+            [ObjectRow(f"dir-{index}/file.bin", index + 1, index)],
+        )
+
+    aggregate_bucket(
+        run_id="run-1",
+        appid="app.one",
+        bucket_name="bucket-a",
+        bucket_id="bucket-id",
+        temp_dir=temp_dir,
+        output_path=tmp_path / "bucket.csv",
+        thresholds=Thresholds(
+            large_directory_bytes=100,
+            large_file_bytes=100,
+            inactive_directory_days=1,
+        ),
+        scan_started_ms=1000,
+        max_directories_in_memory=1,
+        keep_temp_files=True,
+        merge_fan_in=2,
+    )
+
+    aggregation_dir = temp_dir / "_aggregation"
+    assert len(list((aggregation_dir / "chunks").glob("*/*.csv"))) >= 5
+    assert len(list((aggregation_dir / "prefixes").glob("*.csv"))) == 5
+    assert len(list((aggregation_dir / "bucket-runs").glob("*.csv"))) == 5
+
+
+def test_aggregate_bucket_removes_consumed_runs_but_keeps_detail_sources(tmp_path: Path):
+    temp_dir = tmp_path / "_tmp"
+    detail_sources = []
+    for index in range(5):
+        source = temp_dir / f"source-{index}.csv"
+        append_object_rows(source, [ObjectRow(f"dir-{index}/file.bin", 1, index)])
+        detail_sources.append(source)
+
+    aggregate_bucket(
+        run_id="run-1",
+        appid="app.one",
+        bucket_name="bucket-a",
+        bucket_id="bucket-id",
+        temp_dir=temp_dir,
+        output_path=tmp_path / "bucket.csv",
+        thresholds=Thresholds(
+            large_directory_bytes=100,
+            large_file_bytes=100,
+            inactive_directory_days=1,
+        ),
+        scan_started_ms=1000,
+        max_directories_in_memory=1,
+        keep_temp_files=False,
+        merge_fan_in=2,
+    )
+
+    assert all(source.exists() for source in detail_sources)
+    assert len(list((temp_dir / "_aggregation" / "prefixes").glob("*.csv"))) == 5
+    assert not list((temp_dir / "_aggregation" / "bucket-runs").glob("*.csv"))
+
+
+def test_aggregate_bucket_failure_preserves_old_output_and_removes_tmp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    temp_dir = tmp_path / "_tmp"
+    append_object_rows(temp_dir / "objects.csv", [ObjectRow("file.bin", 1, 100)])
+    output = tmp_path / "bucket.csv"
+    output.write_text("old,data\nstale,row\n", encoding="utf-8")
+
+    def fail_while_merging(*args, **kwargs):
+        raise RuntimeError("merge failed")
+        yield
+
+    monkeypatch.setattr("obs_scan_platform.aggregation.iter_merged_summary_rows", fail_while_merging)
+
+    with pytest.raises(RuntimeError, match="merge failed"):
+        aggregate_bucket(
+            run_id="run-1",
+            appid="app.one",
+            bucket_name="bucket-a",
+            bucket_id="bucket-id",
+            temp_dir=temp_dir,
+            output_path=output,
+            thresholds=Thresholds(
+                large_directory_bytes=100,
+                large_file_bytes=100,
+                inactive_directory_days=1,
+            ),
+            scan_started_ms=1000,
+            max_directories_in_memory=1,
+            keep_temp_files=False,
+        )
+
+    assert output.read_text(encoding="utf-8") == "old,data\nstale,row\n"
     assert not output.with_suffix(output.suffix + ".tmp").exists()
