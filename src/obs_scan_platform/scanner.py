@@ -587,6 +587,7 @@ class Scanner:
         path = task.path
         try:
             pointer = ""
+            found_items = False
             while True:
                 request_body = encode_request_body(
                     {
@@ -604,10 +605,11 @@ class Scanner:
                 )
                 payload = _result_payload(data)
                 if _has_empty_filelist_objects(payload):
-                    scheduler.record_empty(task)
                     break
 
-                for item in _items_from_payload(payload, "objects", "files", "list", "items"):
+                items = _items_from_payload(payload, "objects", "files", "list", "items")
+                found_items = found_items or bool(items)
+                for item in items:
                     object_type = str(item.get("objectType") or "").lower()
                     object_key = item.get("objectKey")
                     if object_type == "folder":
@@ -628,7 +630,10 @@ class Scanner:
                 if not next_pointer or next_pointer == pointer:
                     break
                 pointer = next_pointer
-            scheduler.record_expanded(task)
+            if found_items:
+                scheduler.record_expanded(task)
+            else:
+                scheduler.record_empty(task)
         except OBSRequestError as exc:
             scheduler.record_failed(task)
             if partial_errors is not None:

@@ -56,6 +56,8 @@ applications:
 
 `scan.filelist_task_limit_per_bucket` is a threshold for deciding whether to recurse into a deeper level. It does not truncate directory tasks already discovered for the current level.
 
+`scan.metadata_task_limit_per_bucket` defaults to `10000`. After each complete `filelist` BFS level, the scanner checks the cumulative metadata task count. If the count exceeds the limit, discovery for the whole bucket rolls back to the prefix frontier and metadata candidates checkpointed before that level. If the root level overflows, metadata requests are skipped and `objectkeys` scans once with `/` as its prefix.
+
 `objectkeys` scans only the non-overlapping frontier left by `filelist`: successfully expanded and empty directories are excluded, depth/task-limit boundary directories remain, and a failed directory becomes the boundary for its branch.
 
 Recommended request concurrency defaults:

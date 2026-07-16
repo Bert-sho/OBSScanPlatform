@@ -199,6 +199,32 @@ class PhaseOrderClient:
         raise AssertionError(endpoint)
 
 
+class MetadataLimitRollbackClient:
+    def __init__(self, filelist_results: dict[str, dict[str, Any] | Exception]):
+        self.filelist_results = filelist_results
+        self.phase_events: list[str] = []
+        self.objectkeys_prefixes: list[str] = []
+
+    async def get_json(self, url, *, params, headers=None, endpoint="unknown"):
+        del url, headers
+        self.phase_events.append(endpoint)
+        if endpoint == "bucket_endpoint":
+            return {"result": "http://bucket-endpoint/"}
+        if endpoint == "filelist":
+            path = decode_request_body({"params": params})["path"]
+            result = self.filelist_results[path]
+            if isinstance(result, Exception):
+                raise result
+            return {"result": result}
+        if endpoint == "metadata":
+            raise AssertionError("metadata requests must be skipped after rollback")
+        if endpoint == "objectkeys":
+            prefix = base64.urlsafe_b64decode(params["objectkey"].encode("utf-8")).decode("utf-8")
+            self.objectkeys_prefixes.append(prefix)
+            return {"result": {"objectkeys": [], "truncated": "false"}}
+        raise AssertionError(endpoint)
+
+
 class DummyProgressBar:
     def __init__(self):
         self.total = 0
@@ -972,6 +998,106 @@ async def test_discover_root_overflow_restores_previous_whole_level():
     assert discovery.prefixes == ["alpha/", "bravo/"]
     assert discovery.metadata_files == ["root.txt"]
     assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/", "/bravo/"]
+
+
+@pytest.mark.asyncio
+async def test_discover_root_rollback_excludes_empty_prefix_and_logs(caplog: pytest.LogCaptureFixture):
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    scanner.config.scan.metadata_task_limit_per_bucket = 1
+    client = MetadataLimitRollbackClient(
+        {
+            "/": {
+                "files": [
+                    {"objectType": "folder", "objectKey": "alpha/"},
+                    {"objectType": "folder", "objectKey": "empty/"},
+                ],
+                "nextOffset": "",
+            },
+            "/alpha/": {
+                "files": [
+                    {"objectType": "object", "objectKey": "alpha/one.txt"},
+                    {"objectType": "object", "objectKey": "alpha/two.txt"},
+                ],
+                "nextOffset": "",
+            },
+            "/empty/": {"files": [], "nextOffset": ""},
+        }
+    )
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        discovery = await scanner._discover_root(application, bucket, client)
+
+    assert discovery.prefixes == ["alpha/"]
+    assert discovery.metadata_files == []
+    assert any(
+        record.getMessage()
+        == "filelist metadata limit rollback appid=app.one bucket=bucket-name-1 "
+        "depth=2 metadata_tasks=2 limit=1 prefixes=1"
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_scan_bucket_root_overflow_skips_metadata_and_scans_root_prefix(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    scanner.config.scan.metadata_task_limit_per_bucket = 1
+    client = MetadataLimitRollbackClient(
+        {
+            "/": {
+                "files": [
+                    {"objectType": "object", "objectKey": "root-one.txt"},
+                    {"objectType": "object", "objectKey": "root-two.txt"},
+                ],
+                "nextOffset": "",
+            }
+        }
+    )
+
+    result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+
+    assert result.status == ScanStatus.SUCCESS
+    assert client.phase_events == ["bucket_endpoint", "filelist", "objectkeys"]
+    assert client.objectkeys_prefixes == ["/"]
+
+
+@pytest.mark.asyncio
+async def test_metadata_limit_rollback_preserves_filelist_failure():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    scanner.config.scan.metadata_task_limit_per_bucket = 1
+    partial_errors = PartialErrorSummary()
+    client = MetadataLimitRollbackClient(
+        {
+            "/": {
+                "files": [
+                    {"objectType": "folder", "objectKey": "bad/"},
+                    {"objectType": "folder", "objectKey": "noisy/"},
+                ],
+                "nextOffset": "",
+            },
+            "/bad/": detailed_request_error("filelist", "bad directory unavailable"),
+            "/noisy/": {
+                "files": [
+                    {"objectType": "object", "objectKey": "noisy/one.txt"},
+                    {"objectType": "object", "objectKey": "noisy/two.txt"},
+                ],
+                "nextOffset": "",
+            },
+        }
+    )
+
+    discovery = await scanner._discover_root(
+        application,
+        bucket,
+        client,
+        partial_errors=partial_errors,
+    )
+
+    assert discovery.prefixes == ["bad/", "noisy/"]
+    assert discovery.metadata_files == []
+    assert partial_errors.to_manifest()["filelist_failed_dirs"] == 1
 
 
 @pytest.mark.asyncio
