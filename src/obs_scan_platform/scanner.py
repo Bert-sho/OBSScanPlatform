@@ -546,6 +546,22 @@ class Scanner:
                         for task in tasks
                     )
                 )
+                metadata_task_count = scheduler.metadata_task_count
+                metadata_task_limit = max(1, self.config.scan.metadata_task_limit_per_bucket)
+                if metadata_task_count > metadata_task_limit:
+                    rejected_depth = scheduler.current_level_depth
+                    restored_prefix_total = scheduler.rollback_current_level()
+                    LOGGER.info(
+                        "filelist metadata limit rollback appid=%s bucket=%s depth=%s "
+                        "metadata_tasks=%s limit=%s prefixes=%s",
+                        application.appid,
+                        bucket.name,
+                        rejected_depth,
+                        metadata_task_count,
+                        metadata_task_limit,
+                        restored_prefix_total,
+                    )
+                    break
                 if not scheduler.finish_level():
                     break
                 if progress_bar is not None:

@@ -19,6 +19,9 @@ class FilelistDiscoveryScheduler:
     _scanned_paths: set[str] = field(default_factory=set)
     _discovered_prefixes: set[str] = field(default_factory=set)
     _direct_files: list[str] = field(default_factory=list)
+    _rollback_prefixes: set[str] = field(default_factory=set)
+    _rollback_direct_files: list[str] = field(default_factory=list)
+    _current_level_depth: int = 1
     _total_tasks: int = 1
     _completed_tasks: int = 0
 
@@ -31,6 +34,10 @@ class FilelistDiscoveryScheduler:
         return self._completed_tasks
 
     @property
+    def current_level_depth(self) -> int:
+        return self._current_level_depth
+
+    @property
     def pending_total_tasks(self) -> int:
         if self._next_level and self._total_tasks < self.task_limit:
             return self._total_tasks + len(self._next_level)
@@ -39,7 +46,30 @@ class FilelistDiscoveryScheduler:
     def current_level(self) -> list[FilelistTask]:
         tasks = [task for task in self._current_level if task.path not in self._scanned_paths]
         self._current_level = []
+        if tasks:
+            self._rollback_prefixes = {"/"} if tasks[0].depth == 1 else set(self._discovered_prefixes)
+            self._rollback_direct_files = list(self._direct_files)
+            self._current_level_depth = tasks[0].depth
         return tasks
+
+    def _metadata_files(self) -> list[str]:
+        prefixes = sorted(self._discovered_prefixes)
+        return [
+            object_key
+            for object_key in self._direct_files
+            if not any(object_key.startswith(prefix) for prefix in prefixes)
+        ]
+
+    @property
+    def metadata_task_count(self) -> int:
+        return len(self._metadata_files())
+
+    def rollback_current_level(self) -> int:
+        self._discovered_prefixes = set(self._rollback_prefixes)
+        self._direct_files = list(self._rollback_direct_files)
+        self._current_level = []
+        self._next_level = []
+        return len(self._discovered_prefixes)
 
     def record_folder(self, task: FilelistTask, prefix: str) -> None:
         if not prefix:
@@ -56,6 +86,9 @@ class FilelistDiscoveryScheduler:
             self._direct_files.append(str(object_key))
 
     def record_empty(self, task: FilelistTask) -> None:
+        prefix = task.path.strip("/")
+        if prefix:
+            self._rollback_prefixes.discard(f"{prefix}/")
         self.record_expanded(task)
 
     def record_expanded(self, task: FilelistTask) -> None:
@@ -102,9 +135,4 @@ class FilelistDiscoveryScheduler:
 
     def result(self) -> RootDiscovery:
         prefixes = sorted(self._discovered_prefixes)
-        metadata_files = [
-            object_key
-            for object_key in self._direct_files
-            if not any(object_key.startswith(prefix) for prefix in prefixes)
-        ]
-        return RootDiscovery(prefixes=prefixes, metadata_files=metadata_files)
+        return RootDiscovery(prefixes=prefixes, metadata_files=self._metadata_files())

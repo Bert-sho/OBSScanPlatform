@@ -871,6 +871,110 @@ async def test_discover_root_returns_metadata_files_not_covered_by_objectkeys_pr
 
 
 @pytest.mark.asyncio
+async def test_discover_root_allows_metadata_count_equal_to_limit():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    scanner.config.scan.metadata_task_limit_per_bucket = 2
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [
+                        {"objectType": "object", "objectKey": "root.txt"},
+                        {"objectType": "folder", "objectKey": "alpha/"},
+                    ],
+                    "nextOffset": "",
+                }
+            },
+            {
+                "result": {
+                    "files": [{"objectType": "object", "objectKey": "alpha/direct.txt"}],
+                    "nextOffset": "",
+                }
+            },
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert discovery.prefixes == []
+    assert discovery.metadata_files == ["root.txt", "alpha/direct.txt"]
+
+
+@pytest.mark.asyncio
+async def test_discover_root_overflow_uses_root_prefix():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 2
+    scanner.config.scan.metadata_task_limit_per_bucket = 1
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [
+                        {"objectType": "object", "objectKey": "root-one.txt"},
+                        {"objectType": "object", "objectKey": "root-two.txt"},
+                        {"objectType": "folder", "objectKey": "alpha/"},
+                    ],
+                    "nextOffset": "",
+                }
+            },
+            {"result": {"files": [], "nextOffset": ""}},
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert discovery.prefixes == ["/"]
+    assert discovery.metadata_files == []
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_discover_root_overflow_restores_previous_whole_level():
+    scanner, application, bucket = make_scanner()
+    scanner.config.defaults.filelist_depth = 3
+    scanner.config.scan.metadata_task_limit_per_bucket = 2
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "files": [
+                        {"objectType": "object", "objectKey": "root.txt"},
+                        {"objectType": "folder", "objectKey": "alpha/"},
+                        {"objectType": "folder", "objectKey": "bravo/"},
+                    ],
+                    "nextOffset": "",
+                }
+            },
+            {
+                "result": {
+                    "files": [
+                        {"objectType": "object", "objectKey": "alpha/one.txt"},
+                        {"objectType": "object", "objectKey": "alpha/two.txt"},
+                        {"objectType": "folder", "objectKey": "alpha/child/"},
+                    ],
+                    "nextOffset": "",
+                }
+            },
+            {
+                "result": {
+                    "files": [{"objectType": "folder", "objectKey": "bravo/child/"}],
+                    "nextOffset": "",
+                }
+            },
+            {"result": {"files": [], "nextOffset": ""}},
+            {"result": {"files": [], "nextOffset": ""}},
+        ]
+    )
+
+    discovery = await scanner._discover_root(application, bucket, client)
+
+    assert discovery.prefixes == ["alpha/", "bravo/"]
+    assert discovery.metadata_files == ["root.txt"]
+    assert [decode_request_body(call)["path"] for call in client.calls] == ["/", "/alpha/", "/bravo/"]
+
+
+@pytest.mark.asyncio
 async def test_discover_root_joins_child_file_names_to_bucket_path():
     scanner, application, bucket = make_scanner()
     scanner.config.defaults.filelist_depth = 2
