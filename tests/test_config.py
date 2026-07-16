@@ -309,3 +309,73 @@ applications:
     assert settings.large_file_bytes == 10
     assert settings.inactive_directory_days == 180
     assert settings.filelist_depth == 8
+
+
+def test_aggregation_directory_limit_defaults_to_100000(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+scan: {}
+defaults:
+  large_directory_bytes: 100
+  large_file_bytes: 10
+  inactive_directory_days: 180
+applications:
+  - appid: app.one
+    name: App One
+    apptoken: replace-with-test-token
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+
+    assert config.scan.aggregation_max_directories_in_memory == 100000
+
+
+def test_aggregation_directory_limit_loads_explicit_value(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+scan:
+  aggregation_max_directories_in_memory: 4321
+defaults:
+  large_directory_bytes: 100
+  large_file_bytes: 10
+  inactive_directory_days: 180
+applications:
+  - appid: app.one
+    name: App One
+    apptoken: replace-with-test-token
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+
+    assert config.scan.aggregation_max_directories_in_memory == 4321
+
+
+def test_aggregation_directory_limit_rejects_zero(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+scan:
+  aggregation_max_directories_in_memory: 0
+defaults:
+  large_directory_bytes: 100
+  large_file_bytes: 10
+  inactive_directory_days: 180
+applications:
+  - appid: app.one
+    name: App One
+    apptoken: replace-with-test-token
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        load_config(config_file)

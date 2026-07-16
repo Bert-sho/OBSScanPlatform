@@ -15,6 +15,7 @@ scan:
   retry_max_delay_seconds: 60
   filelist_task_limit_per_bucket: 100
   metadata_task_limit_per_bucket: 10000
+  aggregation_max_directories_in_memory: 100000
 
 defaults:
   large_directory_bytes: 107374182400

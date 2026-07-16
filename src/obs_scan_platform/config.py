@@ -21,6 +21,7 @@ class ScanSettings(BaseModel):
     retry_max_delay_seconds: float = 60
     filelist_task_limit_per_bucket: int = 100
     metadata_task_limit_per_bucket: int = 10000
+    aggregation_max_directories_in_memory: int = Field(default=100000, ge=1)
 
     def objectkeys_concurrency_limit(self) -> int:
         if self.objectkeys_concurrency_per_bucket is not None:
