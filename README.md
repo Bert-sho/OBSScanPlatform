@@ -68,11 +68,14 @@ scan:
   global_request_concurrency: 150
   metadata_concurrency_per_bucket: 8
   objectkeys_concurrency_per_bucket: 30
+  aggregation_max_directories_in_memory: 100000
 ```
 
 Applications have no independent scan concurrency limit. `bucket_concurrency` is one run-wide limit shared across all applications and covers each bucket's full lifecycle through temporary-directory finalization. Application `listbuckets` calls do not consume bucket capacity, but they do consume `global_request_concurrency` capacity along with every other HTTP request.
 
 `metadata_concurrency_per_bucket` and `objectkeys_concurrency_per_bucket` limit their respective per-bucket workers. `filelist` and metadata requests still share the global request limit. The legacy `scan.per_bucket_prefix_concurrency` setting remains compatible, but new configs should use `scan.objectkeys_concurrency_per_bucket`.
+
+`scan.aggregation_max_directories_in_memory` defaults to `100000` and must be positive. It limits the directory-statistics dictionary used for each aggregation chunk, not an exact byte count. A single object is attributed to its containing directory and every ancestor before the limit is checked, so a chunk can exceed the configured count by at most that triggering object's directory depth.
 
 For each bucket, scanning completes all `filelist` discovery and metadata requests before starting `objectkeys` collection.
 
@@ -130,14 +133,16 @@ Each successfully aggregated bucket writes one directory summary CSV, including 
 results/<run_id>/<appid>/<bucket>.csv
 ```
 
-The final bucket CSV contains directory-level rollups only. It does not store the full object file list. Per-object temporary CSV files are written under `results/<run_id>/_tmp/` while a bucket is being scanned. When `scan.keep_temp_files` is `false` (the default), each bucket's temporary directory is removed immediately after its final result and before its shared bucket permit is released, for `success`, `partial_failed`, and `failed` buckets. When it is `true`, temporary files are retained for every bucket status.
+The final bucket CSV contains directory-level rollups only. Its path and schema are unchanged, and the manifest path and schema are also unchanged. Per-object temporary CSV files are written under `results/<run_id>/_tmp/` while a bucket is being scanned. Aggregation no longer retains all object keys or all bucket directories in memory: each top-level prefix detail CSV, plus `metadata_files.csv` when present, is converted to a sorted source summary. Directory entries are accumulated until `scan.aggregation_max_directories_in_memory` is reached, written as a sorted chunk, and cleared; the source summaries are then externally merged with a maximum fan-in of 32 into the final bucket CSV. Duplicate object-key rows are intentionally not deduplicated: every occurrence contributes to the rollups.
+
+Aggregation work files are placed below the bucket temporary directory in `_aggregation/chunks`, `_aggregation/prefixes`, and `_aggregation/bucket-runs`. When `scan.keep_temp_files` is `false` (the default), consumed aggregation runs may be removed during processing, and each bucket's whole temporary directory is removed immediately after its final result and before its shared bucket permit is released, for `success`, `partial_failed`, and `failed` buckets. When it is `true`, detail CSVs and all chunk, source-summary, and bucket-run artifacts are retained for every bucket status; this can require substantial disk capacity.
 
 Each run also writes:
 
 - `results/<run_id>/manifest.json`
 - `results/<run_id>/scan.log`
 
-`scan.log` includes per-bucket filelist progress lines, metadata progress fields `completed`, `total`, `succeeded`, and `failed`, and objectkeys progress fields `completed`, `total`, `succeeded`, `failed`, `pages`, and `objects`. Metadata `total` is the number of metadata tasks produced by filelist; when that count is zero, the scanner writes one `metadata skipped ... total=0` record. Every bucket manifest entry includes `started_ms`, `ended_ms`, `started_at`, `ended_at`, and monotonic `elapsed_seconds` timing fields. The total is split into `request_elapsed_seconds` (bucket endpoint, filelist, metadata, and objectkeys collection, including waits/retries/parsing) and `processing_elapsed_seconds` (temporary CSV reading, deduplication, aggregation, and final CSV generation). A request-stage failure reports zero processing time; a processing-stage failure preserves both measured phases. Because buckets run concurrently, per-bucket phase durations must not be summed as the run's wall-clock duration.
+`scan.log` includes per-bucket filelist progress lines, metadata progress fields `completed`, `total`, `succeeded`, and `failed`, and objectkeys progress fields `completed`, `total`, `succeeded`, `failed`, `pages`, and `objects`. Metadata `total` is the number of metadata tasks produced by filelist; when that count is zero, the scanner writes one `metadata skipped ... total=0` record. Aggregation records add `aggregation start` fields `sources` and `directory_limit`, `aggregation source progress` fields `completed`, `total`, and `chunks`, an `aggregation merge` record with `inputs` and `fan_in`, and an `aggregation finish` field `directories`; every record also identifies the application and bucket. Every bucket manifest entry includes `started_ms`, `ended_ms`, `started_at`, `ended_at`, and monotonic `elapsed_seconds` timing fields. The total is split into `request_elapsed_seconds` (bucket endpoint, filelist, metadata, and objectkeys collection, including waits/retries/parsing) and `processing_elapsed_seconds` (temporary CSV reading, chunking, external merging, aggregation, and atomic final CSV generation). Aggregation remains in the processing phase. A request-stage failure reports zero processing time; a processing-stage failure preserves both measured phases. Because buckets run concurrently, per-bucket phase durations must not be summed as the run's wall-clock duration.
 
 Normal successful requests suppress full OBS URLs. Every failed attempt logs its unredacted prepared URL and up to 2048 response characters, together with attempt counters, status, reason, truncation metadata, and exception type. The default retry policy makes up to three retries after the initial request (four attempts total) for retryable failures.
 
