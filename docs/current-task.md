@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Scan only the effective filelist frontier prefixes
+Bound filelist metadata tasks with whole-level rollback
 
 ## Current branch
 
@@ -12,83 +12,94 @@ Scan only the effective filelist frontier prefixes
 
 `wip`
 
-The requested scan behavior is implemented, reviewed, and task-relevant tests
-pass. Repository policy prevents `completed` while the full Windows suite still
-contains the same six pre-existing platform failures.
+The requested behavior is implemented, independently reviewed, and all
+task-relevant tests pass. Repository policy prevents `completed` while the
+full Windows suite still contains the same six pre-existing portability and
+environment failures.
 
 ## User goal
 
-Ensure each bucket's `objectkeys` phase scans only the lowest effective
-directory level left by filelist traversal, without overlapping parent and
-child prefix tasks or duplicate temporary object rows caused by that overlap.
+Prevent deep filelist traversal from creating an excessive number of metadata
+tasks. After each complete BFS level, compare the bucket's cumulative effective
+metadata tasks with a configurable limit; if it exceeds the limit, roll the
+whole bucket back to the previous frontier and use that level for objectkeys
+scanning.
 
 ## Completed work
 
-- Documented and approved the traversal-frontier design and implementation plan.
-- Added RED regression coverage for successful expansion, depth/task-limit
-  boundaries, empty directories, metadata candidates, objectkeys temp files,
-  and filelist failures after partial pagination.
-- Added `record_expanded()` so a successfully processed directory leaves the
-  final prefix candidate set.
-- Added `record_failed()` so a failed directory remains the frontier for its
-  branch while descendant prefixes, direct files, and queued descendant tasks
-  discovered on earlier pages are pruned.
-- Preserved metadata collection for direct files under successfully expanded
-  directories.
-- Updated end-to-end fixtures, README, and repository architecture guidance.
-- Completed an independent read-only review: Critical 0, Important 0, Minor 0,
-  `Ready: Yes`.
+- Added `scan.metadata_task_limit_per_bucket` with default `10000` and example
+  configuration coverage.
+- Added per-level scheduler checkpoints for the accepted prefix frontier and
+  metadata candidates.
+- Added cumulative effective metadata counting using the same filtering logic
+  as final `RootDiscovery.metadata_files`.
+- Enforced strict `>` semantics after the entire BFS level finishes; equality
+  is accepted and rollback is whole-bucket rather than branch-local.
+- Added root fallback to the sole objectkeys prefix `/`.
+- Preserved failed directories and partial-error details during rollback.
+- Removed confirmed empty directories and their covered snapshot direct keys
+  so rollback cannot re-expose metadata tasks beyond the limit.
+- Made empty-directory detection span all pages, including ordinary `files: []`
+  and special `objects: {}` responses.
+- Added INFO rollback logging, root bucket integration coverage, out-of-order
+  same-level concurrency coverage, and pagination terminal-page coverage.
+- Updated README and architecture guidance; manifest and CSV schemas remain
+  unchanged.
+- Completed per-task reviews and final re-review after fixing one Important
+  checkpoint edge case; final result is Ready: Yes with no open findings.
 
 ## Remaining work
 
-- No work remains within this task's functional scope.
-- The six unrelated Windows portability tests must be fixed or conditioned
-  separately before repository policy permits status `completed`.
+- No work remains within this feature's functional scope.
+- The six unrelated Windows portability tests must be fixed or conditioned in
+  a separate task before repository policy permits status `completed`.
 
 ## Key files changed
 
+- `src/obs_scan_platform/config.py`
 - `src/obs_scan_platform/filelist_discovery.py`
 - `src/obs_scan_platform/scanner.py`
+- `config/apps.example.yaml`
+- `tests/test_config.py`
 - `tests/test_scanner.py`
-- `tests/test_scan_end_to_end.py`
 - `README.md`
 - `CLAUDE.md`
-- `docs/superpowers/specs/2026-07-14-filelist-frontier-prefixes-design.md`
-- `docs/superpowers/plans/2026-07-14-filelist-frontier-prefixes.md`
+- `docs/superpowers/specs/2026-07-16-filelist-metadata-limit-rollback-design.md`
+- `docs/superpowers/plans/2026-07-16-filelist-metadata-limit-rollback.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
 ```powershell
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py -k 'frontier or recurse or depth or task_limit or child_filelist_failure or metadata_files_not_covered or child_file_names or child_absolute or non_root_objects or documented_objects or capitalized_folder' -q
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py tests/test_scan_end_to_end.py -q
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_aggregation.py -q
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
 ```
 
 ## Validation result
 
-- Frontier-focused GREEN: `10 passed, 66 deselected`.
-- Scanner and end-to-end suites: `80 passed`.
-- Aggregation suite: `9 passed, 1 failed`; the failure is the pre-existing
-  unescaped Windows temporary path used as a pytest regex.
-- Full suite: `155 passed, 6 failed, 1 warning`. The six failures match the
-  previous branch baseline: one Windows regex escape, two symlink privilege
-  errors, one CRLF/LF assertion, one backslash path-semantics case, and one
-  Windows config-path rendering assertion.
+- Relevant configuration/scanner/end-to-end suites: `101 passed in 1.62s`.
+- Full suite: `166 passed, 6 failed, 1 warning in 2.69s`.
+- The six full-suite failures match the authorized Windows baseline exactly:
+  one unescaped Windows path used as a pytest regex, two symlink privilege
+  errors, one CRLF/LF response assertion, one backslash path-semantics case,
+  and one Windows CLI config-path separator assertion.
+- The warning is a Starlette TestClient/httpx deprecation warning.
 
 ## Known risks
 
-- A failed filelist directory intentionally becomes the objectkeys boundary for
-  its entire branch; this trades further filelist subdivision for complete,
-  non-overlapping fallback coverage.
-- Aggregation's exact-key deduplication remains as defensive protection for API
-  anomalies, but normal parent/child prefix overlap is removed before requests.
-- The complete suite cannot be reported green on this Windows environment until
-  the six unrelated portability failures are addressed.
+- The metadata limit is evaluated after a complete BFS level, so a level can
+  temporarily discover more candidates in memory before rollback; downstream
+  metadata requests are still bounded by the restored result.
+- Confirmed empty child listings are treated as authoritative over snapshot
+  direct keys covered by that child prefix. This is required to keep the
+  restored metadata set consistent with the empty result and within the limit.
+- Full-suite green status still depends on separately addressing the six
+  Windows-only baseline failures.
 
 ## Next recommended action
 
-Track and fix the six Windows portability tests as a separate task. No further
-scanner change is recommended for the frontier-prefix requirement.
+Deploy or exercise the scanner with representative buckets using the default
+limit, then tune `scan.metadata_task_limit_per_bucket` only if operational
+request and memory measurements justify it. Track Windows test portability as
+a separate maintenance task.

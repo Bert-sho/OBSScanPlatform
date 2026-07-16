@@ -2,15 +2,17 @@
 
 ## Timestamp
 
-`2026-07-14 19:46:26 +08:00` (Asia/Shanghai)
+`2026-07-16 14:58:03 +08:00` (Asia/Shanghai)
 
 ## Machine/environment
 
 - Workspace: `D:\code\OBSScanPlatform`
 - OS/shell: Windows PowerShell
 - Branch: `codex/obs-scan-platform`
-- Validation runtime: Codex bundled Python 3.12.13 at
-  `C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe`
+- The current Codex bundled Python lacked pytest during this session.
+- Validation used an isolated, Git-ignored environment at
+  `.superpowers\sdd\.venv`, created from the bundled Python with
+  `python -m venv` and `pip install -e '.[dev]'`.
 - Bare `python` resolves to a nonfunctional Windows Store alias.
 
 ## Current branch
@@ -19,77 +21,91 @@
 
 ## Latest commit before this session
 
-`b6797c7eb84a575af7984ea3f6782abf09659035` (`docs: record scan branch push`)
+`8bf988c133b84b0d1b3032b2a8c61741a71ea838`
+(`fix: scan only filelist frontier prefixes`)
 
 ## Latest commit after this session
 
-- Design: `3885fbb` (`docs: design filelist frontier prefixes`)
-- Plan: `6bbfb05` (`docs: plan filelist frontier prefix fix`)
-- The implementation and this handoff are committed together after this file is
-  written; use `git rev-parse HEAD` for its immutable hash. The final task
-  response records that exact hash.
+- Design: `df421a9` (`docs: design metadata task limit rollback`)
+- Plan: `2ab078f` (`docs: plan metadata task limit rollback`)
+- Configuration: `ee08ea1` (`feat: add metadata task limit configuration`)
+- Core rollback: `120b073` (`feat: rollback filelist levels on metadata overflow`)
+- Edge semantics/integration: `bb15b48` (`fix: cover metadata rollback edge semantics`)
+- Final review fix: `0306ec29718f7ead8f4d222af64603b75e2f0bda`
+  (`fix: keep metadata rollback within limit`)
+- The final handoff documentation commit is created after this file is written;
+  use `git log -1 --oneline` for that immutable hash. The final task response
+  records the exact pushed hash.
 
 ## Summary of what changed
 
-- Replaced “every discovered directory is an objectkeys task” with a stateful
-  filelist traversal frontier.
-- Newly discovered folders begin as candidate final prefixes.
-- A directory is removed from the candidate set only after all its filelist
-  pages complete successfully; direct files under it become metadata tasks.
-- Empty directories are removed.
-- Depth/task-limit boundary directories remain final objectkeys prefixes.
-- A failed directory remains the final prefix for its branch. Descendant
-  prefixes, direct files, and queued descendant tasks discovered on successful
-  earlier pages are removed so the failed parent cannot overlap a child task.
-- Objectkeys progress totals and per-prefix temp CSV files now reflect only the
-  final traversal frontier.
-- Existing exact-object-key aggregation deduplication remains unchanged.
+- Added `scan.metadata_task_limit_per_bucket` with a default of `10000`.
+- Before each filelist BFS level, the scheduler snapshots the accepted prefix
+  frontier and direct metadata candidates.
+- After every complete level, the scanner counts cumulative effective metadata
+  tasks. Counts equal to the limit are accepted; counts greater than the limit
+  restore the previous whole-bucket checkpoint.
+- Root overflow restores `/` as the single objectkeys prefix and skips metadata.
+- Empty directories are removed from both live and rollback frontier state;
+  snapshot direct keys covered by a confirmed-empty prefix are also removed.
+- Failed directories remain rollback prefixes and retain existing failure
+  details/counts.
+- Empty-directory detection now considers all pages, so a populated early page
+  followed by an empty terminal page remains expanded.
+- Added deterministic out-of-order same-level coverage, root bucket integration,
+  rollback log assertions, failure preservation, and pagination variants.
+- README, CLAUDE guidance, design, and implementation plan were updated. No
+  manifest or CSV schema field changed.
 
 ## Important decisions and rationale
 
-- The scheduler updates frontier state during traversal rather than selecting
-  deepest strings afterward. This correctly handles uneven trees, empty
-  directories, task limits, and failed branches.
-- Successful expansion and generic task completion are separate transitions:
-  progress always completes in `finally`, but the parent prefix is removed only
-  on successful pagination completion.
-- Failed-parent pruning is necessary because a later page can fail after earlier
-  pages already queued descendants. Keeping both would recreate parent/child
-  overlap.
-- Tests unrelated to frontier behavior set an explicit shallow filelist depth
-  where they require objectkeys to run; their original phase/failure purpose is
-  preserved.
+- The checkpoint is per BFS level rather than per branch because the user chose
+  whole-bucket rollback and concurrent branches must produce one deterministic
+  frontier.
+- The limit uses cumulative effective metadata tasks, not raw filelist rows;
+  keys covered by retained objectkeys prefixes are not metadata tasks.
+- The check runs only after all tasks in the level finish. This preserves
+  existing concurrency and prevents completion order from changing rollback.
+- Root uses `/` because no shallower non-overlapping frontier exists.
+- A confirmed-empty child is authoritative over snapshot direct keys beneath
+  its prefix; otherwise removing the prefix could re-expose hidden tasks and
+  violate the configured limit.
+- Existing filelist task limit, metadata concurrency, partial-error structures,
+  manifest schema, and CSV schema remain unchanged.
 
 ## Failed attempts or rejected approaches
 
-- Rejected returning all discovered prefixes because it duplicates parent and
-  child requests and temporary rows.
-- Rejected selecting only the deepest strings after traversal because it loses
-  correct branch boundaries in uneven and failed trees.
-- Rejected relying solely on aggregation deduplication because it does not
-  remove duplicate requests, progress inflation, or temporary disk usage.
-- The first broad test edit accidentally changed two failure expectations; RED
-  output exposed the mistake and the expectations were corrected before GREEN.
-- Bare `python -m pytest` produced no usable output due the Windows Store alias;
-  all evidence uses the bundled Python executable.
+- Rejected hard-coding `10000`; the user required a configuration item.
+- Rejected branch-local rollback; the user selected whole-bucket rollback.
+- Rejected checking only the newest level; the user selected cumulative count.
+- The current bundled Python unexpectedly lacked pytest. No global packages
+  were installed; a Git-ignored local virtual environment was used instead.
+- The first empty-directory integration test exposed that ordinary `files: []`
+  did not call `record_empty`; fixed by tracking whether any page contained
+  items across the complete directory task.
+- Final review found that removing an empty rollback prefix could expose old
+  snapshot direct keys and break the limit. A failing combination test proved
+  the issue before the snapshot cleanup fix.
 
 ## Current test/build status
 
-- Focused frontier command: `10 passed, 66 deselected`.
-- `tests/test_scanner.py tests/test_scan_end_to_end.py`: `80 passed`.
-- Full repository suite: `155 passed, 6 failed, 1 warning`.
-- The six failures exactly match the pre-task Windows baseline categories:
-  unescaped Windows regex path, two symlink privilege failures, CRLF/LF
-  response difference, backslash path semantics, and config path rendering.
-- Independent read-only code review: Critical 0, Important 0, Minor 0,
-  `Ready: Yes`. The reviewer could not run pytest in its environment, so the
-  primary agent's fresh command output is the execution evidence.
+- Fresh relevant suite:
+  `101 passed in 1.62s`.
+- Fresh full suite:
+  `166 passed, 6 failed, 1 warning in 2.69s`.
+- The failures exactly match the pre-task Windows baseline categories:
+  unescaped regex path, two symlink privilege failures, CRLF/LF assertion,
+  backslash path semantics, and Windows CLI path rendering.
+- Final fix review: Ready: Yes; Critical 0, Important 0, Minor 0.
+- Task status remains `wip` solely because repository policy forbids
+  `completed` while the full suite has failures.
 
 ## Uncommitted changes, if any
 
-Before the final commit, the intended source, tests, README, architecture docs,
-design/plan updates, and these handoff files are modified. After commit and
-push, `git status --short` must be empty.
+At the time this handoff was written, only the mandatory task/handoff document
+updates were uncommitted. After the final commit and push, `git status --short`
+must be empty. `.superpowers/sdd` contains Git-ignored reports, review packages,
+the progress ledger, and the temporary test environment.
 
 ## Exact resume instructions for the next Codex session
 
@@ -97,15 +113,20 @@ push, `git status --short` must be empty.
 cd D:\code\OBSScanPlatform
 git switch codex/obs-scan-platform
 git status --short --branch
-git log -6 --oneline
+git log -8 --oneline
 
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest tests/test_scanner.py tests/test_scan_end_to_end.py -q
-& 'C:\Users\lzh\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pytest -q
+# If no development pytest environment exists on the next machine:
+python -m venv .venv
+& '.venv\Scripts\python.exe' -m pip install -e '.[dev]'
+
+& '.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& '.venv\Scripts\python.exe' -m pytest -q
 
 git rev-parse HEAD
 git rev-parse origin/codex/obs-scan-platform
 ```
 
-If the two hashes differ, inspect `git status` and `git log` before pushing. If
-push fails, record the exact command/error and provide the manual recovery
-command without blind retries.
+The relevant suite should pass. The full suite is expected to report the six
+documented Windows baseline failures until they are addressed separately. If
+local and remote hashes differ, inspect status/log before pushing; do not retry
+blindly after an authentication, permissions, network, or divergence error.
