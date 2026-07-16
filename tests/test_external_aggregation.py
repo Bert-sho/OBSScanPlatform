@@ -258,6 +258,47 @@ def test_merge_sorted_summaries_enforces_fan_in_bounds(tmp_path: Path):
         merge_sorted_summaries(inputs, tmp_path / "many.csv", fan_in=2)
 
 
+def test_iter_merged_summary_rows_consumes_at_most_fan_in_plus_one_invalid_inputs(
+    tmp_path: Path,
+):
+    consumed = 0
+
+    def inputs():
+        nonlocal consumed
+        for index in range(10):
+            consumed += 1
+            yield tmp_path / f"{index}.csv"
+
+    with pytest.raises(ValueError, match="input count exceeds fan_in"):
+        list(external_aggregation.iter_merged_summary_rows(inputs(), fan_in=2))
+
+    assert consumed == 3
+
+
+def test_iter_top_level_csv_files_ignores_missing_nested_and_symlink_entries(tmp_path: Path):
+    directory = tmp_path / "files"
+    directory.mkdir()
+    csv_path = directory / "objects.csv"
+    csv_path.touch()
+    (directory / "notes.txt").touch()
+    (directory / "nested.csv").mkdir()
+
+    external_target = tmp_path / "external.csv"
+    external_target.touch()
+    symlink_path = directory / "linked.csv"
+    try:
+        symlink_path.symlink_to(external_target)
+    except OSError:
+        symlink_path = None
+
+    discovered = list(external_aggregation.iter_top_level_csv_files(directory))
+
+    assert discovered == [csv_path]
+    if symlink_path is not None:
+        assert symlink_path not in discovered
+    assert list(external_aggregation.iter_top_level_csv_files(tmp_path / "missing")) == []
+
+
 def test_reduce_summary_runs_handles_multiple_rounds_and_deletes_only_consumed_generated_runs(
     tmp_path: Path,
 ):

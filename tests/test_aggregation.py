@@ -1,5 +1,6 @@
 import csv
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -459,6 +460,46 @@ def test_aggregate_bucket_starts_bucket_merge_before_all_sources_are_summarized(
     )
 
     assert source_counts_at_bucket_merge[0] < len(summarized_sources)
+
+
+def test_aggregate_bucket_does_not_use_pathlib_glob_for_discovery_or_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    temp_dir = tmp_path / "_tmp"
+    for index in range(3):
+        append_object_rows(
+            temp_dir / f"source-{index}.csv",
+            [ObjectRow(f"dir-{index}/file.bin", 1, index)],
+        )
+
+    def fail_pathlib_glob(*args, **kwargs):
+        raise AssertionError("pathlib glob must not be used for aggregation file discovery")
+
+    monkeypatch.setattr(Path, "glob", fail_pathlib_glob)
+    monkeypatch.setattr(Path, "rglob", fail_pathlib_glob)
+
+    aggregate_bucket(
+        run_id="run-1",
+        appid="app.one",
+        bucket_name="bucket-a",
+        bucket_id="bucket-id",
+        temp_dir=temp_dir,
+        output_path=tmp_path / "bucket.csv",
+        thresholds=Thresholds(
+            large_directory_bytes=100,
+            large_file_bytes=100,
+            inactive_directory_days=1,
+        ),
+        scan_started_ms=1000,
+        max_directories_in_memory=1,
+        keep_temp_files=False,
+        merge_fan_in=2,
+    )
+
+    bucket_runs_dir = temp_dir / "_aggregation" / "bucket-runs"
+    with os.scandir(bucket_runs_dir) as entries:
+        assert not any(entry.name.endswith(".csv") for entry in entries)
 
 
 def test_aggregate_bucket_failure_preserves_old_output_and_removes_tmp(

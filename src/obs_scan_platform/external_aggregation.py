@@ -1,6 +1,8 @@
 import csv
 import heapq
+import os
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 from typing import Iterable, Iterator
 
@@ -20,6 +22,22 @@ SUMMARY_FIELDS = [
     "latest_modified_ms",
 ]
 MERGE_FAN_IN = 32
+
+
+def iter_top_level_csv_files(directory: Path) -> Iterator[Path]:
+    if directory.is_symlink():
+        return
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                try:
+                    is_regular_file = entry.is_file(follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if is_regular_file and Path(entry.name).match("*.csv"):
+                    yield Path(entry.path)
+    except (FileNotFoundError, NotADirectoryError):
+        return
 
 
 @dataclass(frozen=True)
@@ -100,9 +118,9 @@ def iter_merged_summary_rows(
     inputs: Iterable[Path],
     fan_in: int = MERGE_FAN_IN,
 ) -> Iterator[DirectorySummary]:
-    input_paths = list(inputs)
     if fan_in < 2:
         raise ValueError("fan_in must be at least 2")
+    input_paths = list(islice(inputs, fan_in + 1))
     if len(input_paths) > fan_in:
         raise ValueError("input count exceeds fan_in")
 
@@ -281,7 +299,7 @@ def summarize_object_csv(
 
     if not keep_intermediates:
         resolved_output_path = output_path.resolve()
-        for generated in chunk_dir.rglob("*.csv"):
+        for generated in iter_top_level_csv_files(chunk_dir):
             if generated.resolve() != resolved_output_path:
                 generated.unlink(missing_ok=True)
 

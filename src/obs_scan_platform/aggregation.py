@@ -7,6 +7,7 @@ from obs_scan_platform.config import Thresholds
 from obs_scan_platform.external_aggregation import (
     MERGE_FAN_IN,
     iter_merged_summary_rows,
+    iter_top_level_csv_files,
     reduce_summary_runs,
     summarize_object_csv,
 )
@@ -69,7 +70,7 @@ def aggregate_bucket(
     if max_directories_in_memory < 1:
         raise ValueError("max_directories_in_memory must be at least 1")
 
-    source_count = sum(1 for _ in temp_dir.glob("*.csv"))
+    source_count = sum(1 for _ in iter_top_level_csv_files(temp_dir))
     aggregation_dir = temp_dir / "_aggregation"
     chunks_dir = aggregation_dir / "chunks"
     prefixes_dir = aggregation_dir / "prefixes"
@@ -83,7 +84,7 @@ def aggregate_bucket(
     )
 
     def source_summaries():
-        for completed, source in enumerate(temp_dir.glob("*.csv"), start=1):
+        for completed, source in enumerate(iter_top_level_csv_files(temp_dir), start=1):
             source_id = _source_id(source)
             summary_path = prefixes_dir / f"{source_id}.csv"
             chunk_count = summarize_object_csv(
@@ -163,7 +164,7 @@ def aggregate_bucket(
         raise
 
     if not keep_temp_files:
-        for run in bucket_runs_dir.rglob("*.csv"):
+        for run in iter_top_level_csv_files(bucket_runs_dir):
             run.unlink(missing_ok=True)
 
     LOGGER.info(
