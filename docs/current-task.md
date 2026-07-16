@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Bound filelist metadata tasks with whole-level rollback
+Bound bucket CSV aggregation memory
 
 ## Current branch
 
@@ -12,94 +12,113 @@ Bound filelist metadata tasks with whole-level rollback
 
 `wip`
 
-The requested behavior is implemented, independently reviewed, and all
-task-relevant tests pass. Repository policy prevents `completed` while the
-full Windows suite still contains the same six pre-existing portability and
-environment failures.
+The requested aggregation behavior is implemented, independently reviewed, and
+all task-relevant tests pass. Repository policy prevents `completed` while the
+full Windows suite still contains five pre-existing portability/environment
+failures.
 
 ## User goal
 
-Prevent deep filelist traversal from creating an excessive number of metadata
-tasks. After each complete BFS level, compare the bucket's cumulative effective
-metadata tasks with a configurable limit; if it exceeds the limit, roll the
-whole bucket back to the previous frontier and use that level for objectkeys
-scanning.
+Prevent `MemoryError` while aggregating a bucket after request collection. The
+implementation must use pure CSV files, keep memory bounded across directory
+statistics and temporary-path metadata, preserve the final CSV and manifest
+schemas, and continue honoring `scan.keep_temp_files`.
 
 ## Completed work
 
-- Added `scan.metadata_task_limit_per_bucket` with default `10000` and example
-  configuration coverage.
-- Added per-level scheduler checkpoints for the accepted prefix frontier and
-  metadata candidates.
-- Added cumulative effective metadata counting using the same filtering logic
-  as final `RootDiscovery.metadata_files`.
-- Enforced strict `>` semantics after the entire BFS level finishes; equality
-  is accepted and rollback is whole-bucket rather than branch-local.
-- Added root fallback to the sole objectkeys prefix `/`.
-- Preserved failed directories and partial-error details during rollback.
-- Removed confirmed empty directories and their covered snapshot direct keys
-  so rollback cannot re-expose metadata tasks beyond the limit.
-- Made empty-directory detection span all pages, including ordinary `files: []`
-  and special `objects: {}` responses.
-- Added INFO rollback logging, root bucket integration coverage, out-of-order
-  same-level concurrency coverage, and pagination terminal-page coverage.
-- Updated README and architecture guidance; manifest and CSV schemas remain
-  unchanged.
-- Completed per-task reviews and final re-review after fixing one Important
-  checkpoint edge case; final result is Ready: Yes with no open findings.
+- Added `scan.aggregation_max_directories_in_memory` with default `100000` and
+  positive-value validation.
+- Removed the bucket-wide `seen_object_keys` set and directory-statistics map.
+  Duplicate detail rows are intentionally counted once per occurrence, as
+  approved by the user.
+- Added associative directory-summary CSVs and atomic sibling-`.tmp` writes.
+- Added online hierarchical reducers for both per-source chunks and bucket-wide
+  source summaries. Each merge opens at most 32 inputs, and each level retains
+  at most 31 pending paths.
+- Flushes the current directory map after reaching the configured limit. One
+  triggering object's ancestor chain may exceed the configured count by that
+  object's directory depth.
+- Replaced `Path.glob()`/`Path.rglob()` in the production aggregation path with
+  context-managed `os.scandir()` so source discovery and cleanup do not
+  materialize all directory entries.
+- Bounded invalid merge-input consumption to `fan_in + 1` paths.
+- Streams the unchanged `FINAL_FIELDS` schema in lexical directory order and
+  atomically replaces the final bucket CSV.
+- Preserved top-level prefix detail CSV and `metadata_files.csv` handling,
+  scanner timing/status behavior, bucket concurrency, and manifest schema.
+- Preserved retention semantics: `keep_temp_files=true` keeps detail, chunk,
+  source-summary, and bucket-run artifacts; `false` removes generated work and
+  the bucket finalizer removes the bucket temporary directory for every status.
+- Added aggregation start/source/merge/finish logging and operator/architecture
+  documentation.
+- Completed TDD cycles, per-task reviews, two final-review fixes, and a final
+  independent review with no Critical, Important, or Minor findings.
 
 ## Remaining work
 
-- No work remains within this feature's functional scope.
-- The six unrelated Windows portability tests must be fixed or conditioned in
+- No code work remains within this feature's scope.
+- The five unrelated Windows portability/environment tests must be addressed in
   a separate task before repository policy permits status `completed`.
 
 ## Key files changed
 
 - `src/obs_scan_platform/config.py`
-- `src/obs_scan_platform/filelist_discovery.py`
+- `src/obs_scan_platform/csv_store.py`
+- `src/obs_scan_platform/external_aggregation.py`
+- `src/obs_scan_platform/aggregation.py`
 - `src/obs_scan_platform/scanner.py`
 - `config/apps.example.yaml`
 - `tests/test_config.py`
+- `tests/test_external_aggregation.py`
+- `tests/test_aggregation.py`
 - `tests/test_scanner.py`
 - `README.md`
 - `CLAUDE.md`
-- `docs/superpowers/specs/2026-07-16-filelist-metadata-limit-rollback-design.md`
-- `docs/superpowers/plans/2026-07-16-filelist-metadata-limit-rollback.md`
+- `docs/superpowers/specs/2026-07-16-bounded-csv-aggregation-design.md`
+- `docs/superpowers/plans/2026-07-16-bounded-csv-aggregation.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
 ```powershell
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_aggregation.py tests/test_external_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
+git diff --check 53978e0..HEAD
 ```
 
 ## Validation result
 
-- Relevant configuration/scanner/end-to-end suites: `101 passed in 1.62s`.
-- Full suite: `166 passed, 6 failed, 1 warning in 2.69s`.
-- The six full-suite failures match the authorized Windows baseline exactly:
-  one unescaped Windows path used as a pytest regex, two symlink privilege
-  errors, one CRLF/LF response assertion, one backslash path-semantics case,
-  and one Windows CLI config-path separator assertion.
-- The warning is a Starlette TestClient/httpx deprecation warning.
+- Relevant configuration/aggregation/scanner/end-to-end suites:
+  `146 passed in 2.98s`.
+- Full suite: `202 passed, 5 failed, 1 warning in 3.56s`.
+- The five full-suite failures are the authorized pre-existing Windows baseline:
+  two symlink privilege errors, one CRLF/LF response assertion, one backslash
+  path-semantics case, and one Windows CLI config-path separator assertion.
+- Compilation and diff whitespace checks passed.
+- Final independent review: Ready; Critical 0, Important 0, Minor 0.
 
 ## Known risks
 
-- The metadata limit is evaluated after a complete BFS level, so a level can
-  temporarily discover more candidates in memory before rollback; downstream
-  metadata requests are still bounded by the restored result.
-- Confirmed empty child listings are treated as authoritative over snapshot
-  direct keys covered by that child prefix. This is required to keep the
-  restored metadata set consistent with the empty result and within the limit.
-- Full-suite green status still depends on separately addressing the six
-  Windows-only baseline failures.
+- Aggregation no longer performs exact object-key deduplication. Duplicate rows
+  from overlapping or anomalous API results increase counts and sizes.
+- `aggregation_max_directories_in_memory` bounds directory entries, not bytes;
+  one object may temporarily add its complete ancestor chain before flushing.
+- Online reducers retain `O(32 * merge_levels)` path metadata and use temporary
+  disk proportional to summary volume. `keep_temp_files=true` intentionally
+  retains all aggregation artifacts and can require substantial disk capacity.
+- Aggregation remains synchronous inside the bucket lifecycle and continues to
+  hold the existing bucket permit during processing.
+- Source discovery uses two streaming directory passes (count, then process),
+  relying on the existing lifecycle guarantee that request writers have already
+  finished before aggregation starts.
+- Full-suite green status still depends on separately fixing the five Windows
+  baseline failures.
 
 ## Next recommended action
 
-Deploy or exercise the scanner with representative buckets using the default
-limit, then tune `scan.metadata_task_limit_per_bucket` only if operational
-request and memory measurements justify it. Track Windows test portability as
-a separate maintenance task.
+Run a representative large-bucket scan with the default limit, monitor memory,
+disk use, and aggregation progress logs, and tune
+`scan.aggregation_max_directories_in_memory` only from measured results. Track
+the Windows-only test failures as a separate portability task.

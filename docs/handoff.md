@@ -2,18 +2,17 @@
 
 ## Timestamp
 
-`2026-07-16 14:58:03 +08:00` (Asia/Shanghai)
+`2026-07-16 20:59:54 +08:00` (Asia/Shanghai)
 
 ## Machine/environment
 
 - Workspace: `D:\code\OBSScanPlatform`
 - OS/shell: Windows PowerShell
 - Branch: `codex/obs-scan-platform`
-- The current Codex bundled Python lacked pytest during this session.
-- Validation used an isolated, Git-ignored environment at
-  `.superpowers\sdd\.venv`, created from the bundled Python with
-  `python -m venv` and `pip install -e '.[dev]'`.
-- Bare `python` resolves to a nonfunctional Windows Store alias.
+- Validation used the existing Git-ignored environment at
+  `.superpowers\sdd\.venv`.
+- The bundled/base Python environment did not provide pytest; no global package
+  installation was performed.
 
 ## Current branch
 
@@ -21,91 +20,102 @@
 
 ## Latest commit before this session
 
-`8bf988c133b84b0d1b3032b2a8c61741a71ea838`
-(`fix: scan only filelist frontier prefixes`)
+`6c8bedd660dd1c8326e655eda26b04b5775bddba`
+(`docs: record metadata rollback handoff`)
 
 ## Latest commit after this session
 
-- Design: `df421a9` (`docs: design metadata task limit rollback`)
-- Plan: `2ab078f` (`docs: plan metadata task limit rollback`)
-- Configuration: `ee08ea1` (`feat: add metadata task limit configuration`)
-- Core rollback: `120b073` (`feat: rollback filelist levels on metadata overflow`)
-- Edge semantics/integration: `bb15b48` (`fix: cover metadata rollback edge semantics`)
-- Final review fix: `0306ec29718f7ead8f4d222af64603b75e2f0bda`
-  (`fix: keep metadata rollback within limit`)
+- Design: `e1a1cec` (`docs: design bounded csv aggregation`)
+- Plan: `53978e0` (`docs: plan bounded csv aggregation`)
+- Configuration: `ee52f9b` (`feat: configure aggregation memory bound`)
+- Merge primitives: `565b65e` (`feat: add bounded csv summary merge`)
+- Source summarization: `f788720` (`feat: summarize object csvs with bounded memory`)
+- Bucket integration: `7eab97f` (`fix: bound bucket csv aggregation memory`)
+- Operator/architecture docs: `67d5096` (`docs: document bounded csv aggregation`)
+- Path-metadata bound: `23f709e` (`fix: bound aggregation path metadata`)
+- Streaming discovery: `1a90e3f4d6c63d50d6bc8db209d06bf5633849f4`
+  (`fix: stream aggregation file discovery`)
 - The final handoff documentation commit is created after this file is written;
-  use `git log -1 --oneline` for that immutable hash. The final task response
+  use `git log -1 --oneline` for its immutable hash. The final task response
   records the exact pushed hash.
 
 ## Summary of what changed
 
-- Added `scan.metadata_task_limit_per_bucket` with a default of `10000`.
-- Before each filelist BFS level, the scheduler snapshots the accepted prefix
-  frontier and direct metadata candidates.
-- After every complete level, the scanner counts cumulative effective metadata
-  tasks. Counts equal to the limit are accepted; counts greater than the limit
-  restore the previous whole-bucket checkpoint.
-- Root overflow restores `/` as the single objectkeys prefix and skips metadata.
-- Empty directories are removed from both live and rollback frontier state;
-  snapshot direct keys covered by a confirmed-empty prefix are also removed.
-- Failed directories remain rollback prefixes and retain existing failure
-  details/counts.
-- Empty-directory detection now considers all pages, so a populated early page
-  followed by an empty terminal page remains expanded.
-- Added deterministic out-of-order same-level coverage, root bucket integration,
-  rollback log assertions, failure preservation, and pagination variants.
-- README, CLAUDE guidance, design, and implementation plan were updated. No
-  manifest or CSV schema field changed.
+- Added the validated `scan.aggregation_max_directories_in_memory` setting,
+  defaulting to `100000`.
+- Replaced whole-bucket object-key deduplication and directory aggregation with
+  pure-CSV external aggregation.
+- Each detail CSV is read lazily. A bounded directory map is written as sorted
+  summary chunks and cleared repeatedly.
+- Chunks immediately enter an online hierarchical reducer; completed source
+  summaries immediately enter a second bucket reducer. A merge opens no more
+  than 32 files, each level keeps at most 31 paths, and finish holds only
+  `O(fan_in * levels)` residual paths.
+- Source discovery and cleanup use direct context-managed `os.scandir()` rather
+  than `Path.glob()`/`rglob()`, avoiding pathlib's hidden per-directory list.
+- Final directory rows are streamed in lexical order to the unchanged bucket
+  schema through atomic replacement.
+- Duplicate object rows are deliberately counted per occurrence. No exact
+  object-key set remains.
+- Temporary artifact retention, bucket statuses, manifest fields, request versus
+  processing timing, and bucket concurrency are unchanged.
+- README and CLAUDE guidance document the configuration, aggregation artifacts,
+  no-dedup behavior, memory/disk trade-offs, and progress logs.
 
 ## Important decisions and rationale
 
-- The checkpoint is per BFS level rather than per branch because the user chose
-  whole-bucket rollback and concurrent branches must produce one deterministic
-  frontier.
-- The limit uses cumulative effective metadata tasks, not raw filelist rows;
-  keys covered by retained objectkeys prefixes are not metadata tasks.
-- The check runs only after all tasks in the level finish. This preserves
-  existing concurrency and prevents completion order from changing rollback.
-- Root uses `/` because no shallower non-overlapping frontier exists.
-- A confirmed-empty child is authoritative over snapshot direct keys beneath
-  its prefix; otherwise removing the prefix could re-expose hidden tasks and
-  violate the configured limit.
-- Existing filelist task limit, metadata concurrency, partial-error structures,
-  manifest schema, and CSV schema remain unchanged.
+- The user selected no exact deduplication to eliminate the unbounded object-key
+  set. This trades protection from duplicate API/detail rows for bounded memory.
+- Pure CSV was selected instead of SQLite. It adds no dependency and keeps
+  intermediate files inspectable.
+- The configured limit counts directory entries rather than bytes. Checking
+  after one complete object's ancestor updates preserves correct directory
+  attribution and gives a clear maximum overshoot of one object's depth.
+- Merge fan-in is fixed at 32 to bound open files and heap rows without adding
+  another operator setting.
+- Online hierarchical merging was required after final review showed that lists
+  of all chunk/source paths could themselves recreate `MemoryError`.
+- Direct `os.scandir()` was required after re-review confirmed Python 3.12
+  `Path.glob()` internally materializes a directory's entries.
+- `keep_temp_files=true` preserves every detail and aggregation artifact;
+  `false` deletes successfully consumed work and relies on the existing per-
+  bucket finalizer for complete temporary-directory removal.
 
 ## Failed attempts or rejected approaches
 
-- Rejected hard-coding `10000`; the user required a configuration item.
-- Rejected branch-local rollback; the user selected whole-bucket rollback.
-- Rejected checking only the newest level; the user selected cumulative count.
-- The current bundled Python unexpectedly lacked pytest. No global packages
-  were installed; a Git-ignored local virtual environment was used instead.
-- The first empty-directory integration test exposed that ordinary `files: []`
-  did not call `record_empty`; fixed by tracking whether any page contained
-  items across the complete directory task.
-- Final review found that removing an empty rollback prefix could expose old
-  snapshot direct keys and break the limit. A failing combination test proved
-  the issue before the snapshot cleanup fix.
+- Rejected retaining exact object-key deduplication; the user approved counting
+  duplicate rows repeatedly.
+- Rejected SQLite in favor of the approved pure-CSV design.
+- The first implementation bounded object and directory data but retained lists
+  of every chunk and source-summary path. Final review classified this as an
+  Important violation of complete bounded-memory behavior.
+- The first path-metadata fix removed explicit lists but used `Path.glob()`.
+  Re-review inspected Python 3.12 and found its hidden `list(scandir_it)`, so the
+  implementation was corrected to direct streaming `os.scandir()`.
+- No process-RSS assertion was used; RED/GREEN tests instead prove event ordering
+  (merges begin before all inputs exist), bounded invalid-input consumption, and
+  absence of pathlib glob usage.
 
 ## Current test/build status
 
-- Fresh relevant suite:
-  `101 passed in 1.62s`.
-- Fresh full suite:
-  `166 passed, 6 failed, 1 warning in 2.69s`.
-- The failures exactly match the pre-task Windows baseline categories:
-  unescaped regex path, two symlink privilege failures, CRLF/LF assertion,
-  backslash path semantics, and Windows CLI path rendering.
-- Final fix review: Ready: Yes; Critical 0, Important 0, Minor 0.
+- Fresh relevant suite: `146 passed in 2.98s`.
+- Fresh full suite: `202 passed, 5 failed, 1 warning in 3.56s`.
+- The five failures exactly match the authorized Windows baseline categories:
+  two symlink privilege failures, CRLF/LF response normalization, backslash path
+  semantics, and Windows CLI path rendering.
+- `python -m compileall -q src tests` passed.
+- `git diff --check 53978e0..HEAD` passed.
+- Final independent review of `53978e0..1a90e3f`: Ready; no Critical,
+  Important, or Minor findings.
 - Task status remains `wip` solely because repository policy forbids
   `completed` while the full suite has failures.
 
 ## Uncommitted changes, if any
 
-At the time this handoff was written, only the mandatory task/handoff document
-updates were uncommitted. After the final commit and push, `git status --short`
-must be empty. `.superpowers/sdd` contains Git-ignored reports, review packages,
-the progress ledger, and the temporary test environment.
+At the time this handoff was written, only `docs/current-task.md` and
+`docs/handoff.md` were uncommitted. After the final commit and push,
+`git status --short` must be empty. `.superpowers/sdd` contains Git-ignored
+reports, the progress ledger, and the temporary validation environment.
 
 ## Exact resume instructions for the next Codex session
 
@@ -113,20 +123,20 @@ the progress ledger, and the temporary test environment.
 cd D:\code\OBSScanPlatform
 git switch codex/obs-scan-platform
 git status --short --branch
-git log -8 --oneline
+git log -12 --oneline
 
 # If no development pytest environment exists on the next machine:
 python -m venv .venv
 & '.venv\Scripts\python.exe' -m pip install -e '.[dev]'
 
-& '.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& '.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_aggregation.py tests/test_external_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
 & '.venv\Scripts\python.exe' -m pytest -q
 
 git rev-parse HEAD
 git rev-parse origin/codex/obs-scan-platform
 ```
 
-The relevant suite should pass. The full suite is expected to report the six
+The relevant suite should pass. The full suite is expected to report the five
 documented Windows baseline failures until they are addressed separately. If
 local and remote hashes differ, inspect status/log before pushing; do not retry
 blindly after an authentication, permissions, network, or divergence error.
