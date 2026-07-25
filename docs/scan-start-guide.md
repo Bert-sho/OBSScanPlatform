@@ -24,6 +24,10 @@ cp config/apps.example.yaml config/apps.yaml
 endpoint: http://obs.example
 ```
 
+应用可以显式配置自己的 `endpoint`，其优先级高于顶层值；应用 `endpoint` 缺失、为空字符串或为 `null` 时会继承非空的顶层 `endpoint`。如果两处都没有非空值，最终 endpoint 为空。
+
+配置加载允许应用的运行身份暂时不完整，但扫描启用应用前会先检查最终 `endpoint`、`appid` 和 `apptoken`。任一项为空时，不会创建 OBS 客户端或发送请求；该应用在 manifest 中记录为 `failed`、`buckets: []`，其他启用应用继续扫描。`name` 为空不影响扫描。
+
 每个应用默认不扫描共享桶，如需纳入共享桶可显式开启：
 
 ```yaml
@@ -51,8 +55,23 @@ applications:
     apptoken: replace-with-real-token
     buckets:
       bucket-1191:
+        enable: true
         filelist_depth: 8
 ```
+
+桶配置映射不是白名单。未配置的桶、未写 `enable` 的桶以及 `enable: true` 的桶都会按现有资格规则扫描；只有桶名精确匹配且显式设置 `enable: false` 才会跳过：
+
+```yaml
+applications:
+  - appid: com.camera.pergen
+    buckets:
+      bucket-to-skip:
+        enable: false
+```
+
+跳过的桶不会调用桶 endpoint、filelist、metadata 或 objectkeys，不生成 CSV，也不出现在桶级 manifest 条目中。配置中存在但 `listbuckets` 未返回的桶不产生影响。
+
+全局阈值缺失时的默认值为：大目录 `large_directory_bytes: 107374182400`（100 GiB）、大文件 `large_file_bytes: 10737418240`（10 GiB）、不活跃目录 `inactive_directory_days: 180`、发现深度 `filelist_depth: 5`。桶级对应字段缺失或显式为 `null` 时继承全局阈值。
 
 `scan.filelist_task_limit_per_bucket` 是是否继续递归到更深层级的目标阈值，不会截断当前层级已经发现并纳入队列的目录任务。
 

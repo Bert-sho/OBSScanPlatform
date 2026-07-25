@@ -35,8 +35,8 @@ No linter/formatter is configured.
 Python 3.11+ package under `src/obs_scan_platform/`. It scans OBS buckets over an HTTP API and produces per-bucket directory-level CSV rollups. The CLI (`cli.py`) and FastAPI server (`api.py`) are thin fronts over `scanner.run_scan`.
 
 ### Per-bucket scan pipeline (`scanner.py`)
-For each enabled application → each scan-capable bucket, the ordered flow is:
-1. `listbuckets` → build `BucketInfo`s. `should_scan_bucket` filters: must have id/name/vendor/region; shared buckets only when `scan_shared_buckets` is set, otherwise owner-only.
+For each enabled application, validate the resolved `endpoint`, `appid`, and `apptoken` before constructing an OBS client; an incomplete application becomes a failed manifest entry with no buckets or requests, while sibling applications continue. For each valid application → each scan-capable bucket, the ordered flow is:
+1. `listbuckets` → build `BucketInfo`s. `should_scan_bucket` filters: must have id/name/vendor/region; shared buckets only when `scan_shared_buckets` is set, otherwise owner-only. After eligibility filtering, an exact `application.buckets` match with `enable: false` skips that bucket entirely; absent entries, missing `enable`, and `enable: true` scan normally.
 2. `bucket/endpoint` → resolve the per-bucket data endpoint.
 3. **filelist discovery** — bounded BFS over directories (see scheduler below).
 4. **metadata** for root-level files, then **objectkeys** for discovered prefixes. Discovery + metadata always complete *before* objectkeys for a bucket.
@@ -59,7 +59,7 @@ Objects are written as top-level temp detail CSVs under `results/<run_id>/_tmp/<
 Aggregation artifacts live under `_aggregation/chunks`, `_aggregation/prefixes`, and `_aggregation/bucket-runs`. With `scan.keep_temp_files=false`, consumed runs may be deleted early and every bucket finalizes its temporary directory immediately for `success`, `partial_failed`, and `failed` results while still holding its run-global bucket permit. With `true`, detail CSVs and all aggregation artifacts are retained, potentially using substantial disk. A cleanup error converts that bucket result to `failed` without abandoning sibling scans. Aggregation remains in the existing processing timing phase. Status uses `_rollup_status` (`success`/`partial_failed`/`failed`); partial failures are collected in `PartialErrorSummary` and surfaced in `manifest.json` without changing manifest schema or final CSV paths.
 
 ### Config (`config.py`)
-Single `AppConfigFile` loaded from YAML. `endpoint` is global or per-application. `thresholds_for` merges `defaults` with per-bucket `BucketOverrides` (a bucket may override e.g. `filelist_depth` without repeating other thresholds). `masked_dict` masks `apptoken` for API responses.
+Single `AppConfigFile` loaded from YAML, with model defaults for every field. A non-empty per-application `endpoint` takes precedence; otherwise a missing, empty, or null application endpoint inherits a non-empty global endpoint. `thresholds_for` merges global defaults (`large_directory_bytes=107374182400`, `large_file_bytes=10737418240`, `inactive_directory_days=180`, `filelist_depth=5`) with nullable per-bucket `BucketOverrides`. `BucketOverrides.enable` defaults to `true`, and only explicit `false` opts out an exact bucket name. `missing_scan_fields` enforces resolved endpoint/appid/apptoken at application scan time. `masked_dict` masks `apptoken` for API responses.
 
 ### Security / redaction
 `_sanitize_reason` (models.py) strips URLs and secret query params (`token`, `csb-token`, `apikey`, etc.) from anything logged or written to manifests. Never log raw request URLs, bodies, or tokens. API path params go through `_safe_segment`/`_safe_child` to block traversal.

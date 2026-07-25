@@ -1,5 +1,7 @@
 # OBS Scan Platform
 
+[中文文档](README.zh-CN.md)
+
 Python backend for scanning OBS bucket usage with controlled concurrency and directory-level CSV aggregation.
 
 ## Development Setup
@@ -51,8 +53,21 @@ applications:
     apptoken: replace-with-real-token
     buckets:
       bucket-1191:
+        enable: true
         filelist_depth: 8
 ```
+
+The bucket map is not a whitelist. Every eligible bucket returned by `listbuckets` is scanned unless the exact matching bucket entry explicitly sets `enable: false`:
+
+```yaml
+applications:
+  - appid: com.camera.pergen
+    buckets:
+      bucket-to-skip:
+        enable: false
+```
+
+An absent bucket entry, an entry without `enable`, and `enable: true` all scan the bucket. A bucket with `enable: false` is skipped after the existing scan-capability and owner/shared-bucket checks. It makes no bucket endpoint, filelist, metadata, or objectkeys requests, produces no CSV, and has no bucket entry in the manifest. Configuring a bucket that `listbuckets` does not return has no effect.
 
 `scan.filelist_task_limit_per_bucket` is a threshold for deciding whether to recurse into a deeper level. It does not truncate directory tasks already discovered for the current level.
 
@@ -78,6 +93,77 @@ Applications have no independent scan concurrency limit. `bucket_concurrency` is
 `scan.aggregation_max_directories_in_memory` defaults to `100000` and must be positive. It limits the directory-statistics dictionary used for each aggregation chunk, not an exact byte count. A single object is attributed to its containing directory and every ancestor before the limit is checked, so a chunk can exceed the configured count by at most that triggering object's directory depth.
 
 For each bucket, scanning completes all `filelist` discovery and metadata requests before starting `objectkeys` collection.
+
+## Configuration Contract
+
+All modeled fields may be omitted. Defaults are applied by the configuration models and are visible through the masked `GET /config/apps` response. A missing field uses the defaults below; explicit `null` is still invalid for non-nullable fields.
+
+### Top-level defaults
+
+| Field | Missing-field default |
+| --- | --- |
+| `endpoint` | `""` |
+| `scan` | All scan defaults below |
+| `defaults` | All global threshold defaults below |
+| `applications` | `[]` |
+
+### Scan defaults
+
+| Field | Raw missing-field default | Effective behavior |
+| --- | --- | --- |
+| `results_dir` | `"results"` | — |
+| `temp_subdir` | `"_tmp"` | — |
+| `keep_temp_files` | `false` | — |
+| `page_size` | `1000` | — |
+| `bucket_concurrency` | `4` | — |
+| `global_request_concurrency` | `150` | — |
+| `per_bucket_prefix_concurrency` | `null` | Legacy objectkeys concurrency alias |
+| `objectkeys_concurrency_per_bucket` | `null` | Uses this value when set; otherwise uses `per_bucket_prefix_concurrency`; when both are absent/`null`, the effective limit is `30` |
+| `metadata_concurrency_per_bucket` | `8` | — |
+| `request_timeout_seconds` | `30` | — |
+| `max_retries` | `3` | Three retries after the initial attempt |
+| `retry_base_delay_seconds` | `2` | — |
+| `retry_max_delay_seconds` | `60` | — |
+| `filelist_task_limit_per_bucket` | `100` | — |
+| `metadata_task_limit_per_bucket` | `10000` | — |
+| `aggregation_max_directories_in_memory` | `100000` | Must be positive |
+
+### Global threshold defaults
+
+| Field | Missing-field default |
+| --- | --- |
+| `large_directory_bytes` | `107374182400` (100 GiB) |
+| `large_file_bytes` | `10737418240` (10 GiB) |
+| `inactive_directory_days` | `180` |
+| `filelist_depth` | `5` |
+
+### Application defaults
+
+| Field | Missing-field default |
+| --- | --- |
+| `appid` | `""` |
+| `name` | `""` |
+| `endpoint` | `""`, then inherit a non-empty top-level endpoint |
+| `apptoken` | `""` |
+| `enabled` | `true` |
+| `scan_shared_buckets` | `false` |
+| `buckets` | `{}` |
+
+Endpoint resolution has exact precedence: a non-empty application `endpoint` wins; otherwise the application inherits a non-empty top-level `endpoint`; otherwise its effective endpoint remains empty. Application `endpoint: null` is accepted and inherits like an absent or empty value. The top-level endpoint is also nullable, but explicit `null` does not supply an operational endpoint.
+
+Configuration loading intentionally accepts incomplete applications. Immediately before scanning each enabled application—and before constructing an OBS client or sending any request—the scanner requires a non-empty resolved `endpoint`, `appid`, and `apptoken`. Missing fields make only that application manifest entry `failed`, with an actionable `error` and `buckets: []`; sibling enabled applications continue. A missing `name` does not block scanning, and `enabled: false` applications are not scanned.
+
+### Bucket defaults
+
+| Field | Missing-field default/effective behavior |
+| --- | --- |
+| `enable` | `true` |
+| `large_directory_bytes` | `null`; inherit global `large_directory_bytes` (`107374182400` by default) |
+| `large_file_bytes` | `null`; inherit global `large_file_bytes` (`10737418240` by default) |
+| `inactive_directory_days` | `null`; inherit global `inactive_directory_days` (`180` by default) |
+| `filelist_depth` | `null`; inherit global `filelist_depth` (`5` by default) |
+
+Bucket threshold overrides are nullable: explicit `null` means “do not override the global threshold.” This is different from non-nullable fields, where explicit `null` is a validation error and only omission activates the declared default.
 
 ## CLI Scans
 
