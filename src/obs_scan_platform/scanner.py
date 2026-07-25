@@ -319,7 +319,14 @@ class Scanner:
                 share_from=item.get("shareFrom"),
             )
             if should_scan_bucket(bucket, application.scan_shared_buckets):
-                buckets.append(bucket)
+                if self.config.bucket_enabled(application, bucket.name):
+                    buckets.append(bucket)
+                else:
+                    LOGGER.info(
+                        "bucket skipped appid=%s bucket=%s reason=config_disabled",
+                        application.appid,
+                        bucket.name,
+                    )
             elif not is_scan_capable_bucket(bucket):
                 LOGGER.warning(
                     "bucket skipped appid=%s bucket=%s reason=missing_required_fields",

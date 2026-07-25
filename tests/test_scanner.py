@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import pytest
 
-from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds
+from obs_scan_platform.config import AppConfigFile, ApplicationConfig, BucketOverrides, Thresholds
 from obs_scan_platform.logging_config import configure_logging
 from obs_scan_platform.models import BucketInfo, BucketScanResult, PartialErrorSummary, ScanStatus
 from obs_scan_platform.obs_client import OBSClient, OBSRequestError
@@ -343,14 +343,14 @@ async def test_get_bucket_endpoint_uses_bucket_name_as_bucketid_and_id_as_bucket
 
     assert endpoint == "http://bucket-endpoint"
     call = client.calls[0]
-    assert call["url"].startswith("http://global-obs.example/")
+    assert call["url"].startswith("http://app-obs.example/")
     assert call["url"].endswith("/rest/s3/bucket/endpoint")
     assert call["params"]["bucketid"] == bucket.name
     assert call["params"]["bucketUid"] == bucket.bucket_id
 
 
 @pytest.mark.asyncio
-async def test_list_buckets_uses_global_endpoint_and_includes_shared_when_enabled():
+async def test_list_buckets_uses_application_endpoint_and_includes_shared_when_enabled():
     scanner, application, _ = make_scanner()
     application.scan_shared_buckets = True
     client = FakeClient(
@@ -391,7 +391,7 @@ async def test_list_buckets_uses_global_endpoint_and_includes_shared_when_enable
     buckets = await scanner._list_buckets(application, client)
 
     assert [bucket.name for bucket in buckets] == ["owned-bucket", "shared-bucket", "reader-bucket"]
-    assert client.calls[0]["url"].startswith("http://global-obs.example/")
+    assert client.calls[0]["url"].startswith("http://app-obs.example/")
 
 
 @pytest.mark.asyncio
@@ -430,6 +430,42 @@ async def test_list_buckets_includes_shared_bucket_lists_when_enabled():
     buckets = await scanner._list_buckets(application, client)
 
     assert [bucket.name for bucket in buckets] == ["owned-bucket", "shared-bucket"]
+
+
+@pytest.mark.asyncio
+async def test_list_buckets_skips_only_explicitly_disabled_exact_bucket(caplog: pytest.LogCaptureFixture):
+    scanner, application, _ = make_scanner()
+    application.buckets = {
+        "bucket-off": BucketOverrides(enable=False),
+        "bucket-on": BucketOverrides(),
+    }
+    client = FakeClient(
+        [
+            {
+                "result": {
+                    "buckets": [
+                        {
+                            "id": f"{name}-id",
+                            "name": name,
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "owner",
+                            "shareFrom": None,
+                        }
+                        for name in ("bucket-off", "bucket-on", "bucket-unconfigured")
+                    ]
+                }
+            }
+        ]
+    )
+
+    with caplog.at_level(logging.INFO, logger="obs_scan_platform.scanner"):
+        buckets = await scanner._list_buckets(application, client)
+
+    assert [bucket.name for bucket in buckets] == ["bucket-on", "bucket-unconfigured"]
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("bucket skipped appid=app.one bucket=bucket-off reason=config_disabled" in msg for msg in messages)
+    assert all("token" not in msg.lower() for msg in messages)
 
 
 @pytest.mark.asyncio
@@ -492,7 +528,7 @@ async def test_discover_root_uses_bucket_filelist_and_parses_first_level_items()
     discovery = await scanner._discover_root(application, bucket, client)
 
     call = client.calls[0]
-    assert call["url"].startswith("http://global-obs.example/")
+    assert call["url"].startswith("http://app-obs.example/")
     assert call["url"].endswith("/rest/s3/bucket/filelist")
     assert discovery.prefixes == []
     assert discovery.root_files == ["root.txt"]
