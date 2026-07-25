@@ -210,6 +210,21 @@ class Scanner:
         bucket_semaphore: asyncio.Semaphore,
     ) -> dict[str, Any]:
         LOGGER.info("application start appid=%s", application.appid)
+        missing_fields = self.config.missing_scan_fields(application)
+        if missing_fields:
+            error = f"missing required scan configuration: {', '.join(missing_fields)}"
+            LOGGER.error(
+                "application failure appid=%s error=missing_required_scan_configuration fields=%s",
+                application.appid or "<missing>",
+                ",".join(missing_fields),
+            )
+            return {
+                "appid": application.appid,
+                "name": application.name,
+                "status": ScanStatus.FAILED.value,
+                "error": error,
+                "buckets": [],
+            }
         async with httpx.AsyncClient(timeout=self.config.scan.request_timeout_seconds) as http:
             client = OBSClient(
                 http=http,

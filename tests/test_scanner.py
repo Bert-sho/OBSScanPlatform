@@ -1613,6 +1613,65 @@ async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_fail
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("missing_field", ["endpoint", "appid", "apptoken"])
+async def test_scan_application_rejects_missing_operational_field_before_http(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    missing_field: str,
+):
+    scanner, application, _ = make_scanner()
+    if missing_field == "endpoint":
+        scanner.config.endpoint = ""
+        application.endpoint = ""
+    else:
+        setattr(application, missing_field, "")
+
+    monkeypatch.setattr(
+        "obs_scan_platform.scanner.httpx.AsyncClient",
+        lambda *args, **kwargs: pytest.fail("HTTP client must not be constructed"),
+    )
+
+    result = await scanner._scan_application(
+        application,
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+        bucket_semaphore=asyncio.Semaphore(1),
+    )
+
+    assert result["status"] == "failed"
+    assert result["buckets"] == []
+    assert missing_field in result["error"]
+    assert "token-1" not in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_run_keeps_other_applications_after_missing_operational_field(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, invalid_application, _ = make_scanner()
+    invalid_application.apptoken = ""
+    valid_application = second_application()
+    scanner.config.applications = [invalid_application, valid_application]
+    scanner.config.scan.results_dir = str(tmp_path)
+
+    async def fake_list_buckets(application: ApplicationConfig, client: Any) -> list[BucketInfo]:
+        del client
+        assert application.appid == "app.two"
+        return []
+
+    monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+
+    manifest = await scanner.run(run_id="run-1")
+
+    assert manifest["status"] == "partial_failed"
+    assert manifest["applications"][0]["status"] == "failed"
+    assert manifest["applications"][0]["buckets"] == []
+    assert manifest["applications"][1]["status"] == "success"
+
+
+@pytest.mark.asyncio
 async def test_run_keeps_other_applications_after_listbuckets_request_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
