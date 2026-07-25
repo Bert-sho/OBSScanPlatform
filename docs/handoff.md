@@ -74,7 +74,13 @@ git diff --check 8eaf918..HEAD
 
 ## Uncommitted changes, if any
 
-The known HEAD before this correction is `054a56881b5c6449d46fb7f51f1db1135a661af6`. After this correction commit, the tracked working tree is expected to be clean; only Git-ignored SDD reports remain under `.superpowers\sdd`. The branch remains unpushed and ahead of `origin/codex/obs-scan-platform` until the controller completes final verification and push.
+After correction commit `dd8bcc7b5a7d6a3657edbd530b9ab18882ec310c`, the tracked working tree is clean. The branch remains unpushed and ahead of `origin/codex/obs-scan-platform` until the controller completes final verification and push. Ignored local artifacts include:
+
+- `.claude/` local assistant state;
+- `.pytest_cache/` test cache;
+- `.superpowers/sdd/` local virtual environment, task reports, briefs, review diffs, and progress files;
+- `src/obs_scan_platform.egg-info/` packaging metadata; and
+- Python `__pycache__/` directories.
 
 ## Exact resume instructions for the next Codex session
 
