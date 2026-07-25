@@ -328,6 +328,18 @@ applications:
     assert config.applications[0].endpoint == "http://obs.global"
 
 
+def test_whitespace_application_endpoint_falls_back_to_empty_global_endpoint():
+    config = AppConfigFile(endpoint="\t", applications=[{"endpoint": "  "}])
+
+    assert config.endpoint_for(config.applications[0]) == ""
+
+
+def test_whitespace_global_endpoint_falls_back_to_empty():
+    config = AppConfigFile(endpoint="  ", applications=[{}])
+
+    assert config.endpoint_for(config.applications[0]) == ""
+
+
 def test_null_non_nullable_default_is_rejected(tmp_path: Path):
     config_file = tmp_path / "apps.yaml"
     config_file.write_text(
@@ -379,6 +391,24 @@ applications:
     assert settings.large_file_bytes == 10
     assert settings.inactive_directory_days == 180
     assert settings.filelist_depth == 8
+
+
+def test_bucket_override_can_disable_a_bucket(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+applications:
+  - buckets:
+      bucket-disabled:
+        enable: false
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+    application = config.applications[0]
+
+    assert config.bucket_enabled(application, "bucket-disabled") is False
 
 
 def test_aggregation_directory_limit_defaults_to_100000(tmp_path: Path):

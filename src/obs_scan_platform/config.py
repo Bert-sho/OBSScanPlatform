@@ -84,11 +84,11 @@ class AppConfigFile(BaseModel):
             "inactive_directory_days": self.defaults.inactive_directory_days,
             "filelist_depth": self.defaults.filelist_depth,
         }
-        values.update(override.model_dump(exclude_none=True))
+        values.update(override.model_dump(exclude_none=True, exclude={"enable"}))
         return Thresholds.model_validate(values)
 
     def endpoint_for(self, application: ApplicationConfig) -> str:
-        return application.endpoint or self.endpoint or ""
+        return (application.endpoint or "").strip() or (self.endpoint or "").strip()
 
     def missing_scan_fields(self, application: ApplicationConfig) -> list[str]:
         values = {
