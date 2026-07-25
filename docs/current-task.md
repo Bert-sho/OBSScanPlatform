@@ -26,11 +26,11 @@ Make configuration sections safe to omit by supplying operational defaults; reso
 - Added an early application preflight that reports missing nonblank `endpoint`, `appid`, or `apptoken` before list-buckets or other API requests.
 - Added targeted configuration, scanner, and end-to-end tests, corrected old global-first scanner assertions, and documented the YAML contract and examples.
 - Completed final whole-feature review of `50c1144..c55abcb`: Ready; Critical 0, Important 0, Minor 0.
+- Successfully pushed `codex/obs-scan-platform` through `99b6c75271fa11902b2706e5c0b766b3fa5bad52`.
 
 ## Remaining work
 
 - No feature work remains.
-- Push the committed branch after the controller finishes its final verification.
 - Address the five unrelated Windows portability/environment failures in a separate task before repository policy permits status `completed`.
 
 ## Key files changed
@@ -78,4 +78,4 @@ git diff --check 8eaf918..HEAD
 
 ## Next recommended action
 
-Have the controller run its final repository verification, push `codex/obs-scan-platform`, and then create or schedule a separate Windows portability task for the five baseline failures.
+Create or schedule a separate Windows portability task for the five baseline failures; that work is the only remaining prerequisite for repository status `completed`.

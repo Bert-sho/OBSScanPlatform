@@ -29,7 +29,9 @@
 - `1f93256` - `fix: reject incomplete applications before requests`
 - `c55abcb` - `docs: document config defaults and bucket opt out`
 - `054a56881b5c6449d46fb7f51f1db1135a661af6` - `docs: record config defaults handoff` (the immutable handoff-content commit).
-- This correction necessarily creates a new commit after this file is written, so its immutable hash must be obtained with `git log -1 --oneline`; the controller will report that correction-commit hash after push.
+- `dd8bcc7b5a7d6a3657edbd530b9ab18882ec310c` - `docs: correct config handoff state`
+- `99b6c75271fa11902b2706e5c0b766b3fa5bad52` - `docs: clarify ignored handoff artifacts`
+- `git push -u origin HEAD` succeeded through `99b6c75271fa11902b2706e5c0b766b3fa5bad52`; the final push-status documentation commit is created after that verification and will be pushed immediately by the controller. Obtain its immutable hash with `git log -1 --oneline`; the controller will include it in the final response.
 
 ## Summary of what changed
 
@@ -74,7 +76,7 @@ git diff --check 8eaf918..HEAD
 
 ## Uncommitted changes, if any
 
-After correction commit `dd8bcc7b5a7d6a3657edbd530b9ab18882ec310c`, the tracked working tree is clean. The branch remains unpushed and ahead of `origin/codex/obs-scan-platform` until the controller completes final verification and push. Ignored local artifacts include:
+After the successful `git push -u origin HEAD`, the tracked working tree was clean and local HEAD matched `origin/codex/obs-scan-platform` at `99b6c75271fa11902b2706e5c0b766b3fa5bad52`. The final push-status documentation commit is created after that verification; the controller will push it immediately and report its `git log -1` hash in the final response. Ignored local artifacts include:
 
 - `.claude/` local assistant state;
 - `.pytest_cache/` test cache;
@@ -97,12 +99,14 @@ git show --stat HEAD
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
 git diff --check 8eaf918..HEAD
 
-# The controller owns the final verification and push.
+# Push only when local and remote commits differ.
 git status --short --branch
 git diff --stat
 git diff
 git diff --check
-git push -u origin HEAD
+if ((git rev-parse HEAD) -ne (git rev-parse origin/codex/obs-scan-platform)) {
+  git push -u origin HEAD
+}
 git status --short --branch
 git rev-parse HEAD
 git rev-parse origin/codex/obs-scan-platform
