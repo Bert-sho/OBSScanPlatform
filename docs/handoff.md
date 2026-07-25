@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-`2026-07-25 12:11:54 +08:00` (Asia/Shanghai)
+`2026-07-25 12:22:22 +08:00` (Asia/Shanghai)
 
 ## Machine/environment
 
@@ -21,14 +21,15 @@
 
 ## Latest commit after this session
 
-- `8eaf918` — `docs: design config defaults and bucket enable`
-- `3dabf3d` — `docs: plan config defaults and bucket enable`
-- `a080839` — `feat: default all scan configuration fields`
-- `12dfd69` — `fix: normalize config endpoint fallbacks`
-- `05cc115` — `feat: allow per-bucket scan opt out`
-- `1f93256` — `fix: reject incomplete applications before requests`
-- `c55abcb` — `docs: document config defaults and bucket opt out`
-- The final handoff commit is created after this file is finalized; obtain its immutable hash with `git log -1 --oneline` before pushing.
+- `8eaf918` - `docs: design config defaults and bucket enable`
+- `3dabf3d` - `docs: plan config defaults and bucket enable`
+- `a080839` - `feat: default all scan configuration fields`
+- `12dfd69` - `fix: normalize config endpoint fallbacks`
+- `05cc115` - `feat: allow per-bucket scan opt out`
+- `1f93256` - `fix: reject incomplete applications before requests`
+- `c55abcb` - `docs: document config defaults and bucket opt out`
+- `054a56881b5c6449d46fb7f51f1db1135a661af6` - `docs: record config defaults handoff` (the immutable handoff-content commit).
+- This correction necessarily creates a new commit after this file is written, so its immutable hash must be obtained with `git log -1 --oneline`; the controller will report that correction-commit hash after push.
 
 ## Summary of what changed
 
@@ -52,9 +53,19 @@
 
 ## Current test/build status
 
-- Task-relevant command: `pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q` — `118 passed in 1.73s`.
-- Combined config/scanner/end/api/cli command — `135 passed, 5 failed, 1 warning in 2.73s`.
-- Full suite — `215 passed, 5 failed, 1 warning in 6.76s`.
+The following commands were run with the existing SDD virtual environment:
+
+```powershell
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py tests/test_api.py tests/test_cli.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
+git diff --check 8eaf918..HEAD
+```
+
+- Task-relevant config/scanner/end-to-end command - `118 passed in 1.73s`.
+- Combined config/scanner/end/api/cli command - `135 passed, 5 failed, 1 warning in 2.73s`.
+- Full suite - `215 passed, 5 failed, 1 warning in 6.76s`.
 - The same five pre-existing Windows categories are two symlink privilege failures, CRLF response normalization, backslash path semantics, and CLI config-path separator behavior.
 - `python -m compileall -q src tests` passed.
 - `git diff --check 8eaf918..HEAD` passed.
@@ -63,7 +74,7 @@
 
 ## Uncommitted changes, if any
 
-At handoff preparation, only `docs/current-task.md` and `docs/handoff.md` are to be staged for `docs: record config defaults handoff`. The required task report is under the Git-ignored `.superpowers\sdd` workspace. After the handoff commit, working-tree changes should be empty; the branch is currently ahead of `origin/codex/obs-scan-platform` until the controller pushes it.
+The known HEAD before this correction is `054a56881b5c6449d46fb7f51f1db1135a661af6`. After this correction commit, the tracked working tree is expected to be clean; only Git-ignored SDD reports remain under `.superpowers\sdd`. The branch remains unpushed and ahead of `origin/codex/obs-scan-platform` until the controller completes final verification and push.
 
 ## Exact resume instructions for the next Codex session
 
@@ -75,10 +86,16 @@ git log -10 --oneline
 
 git show --stat HEAD
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py tests/test_api.py tests/test_cli.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
 git diff --check 8eaf918..HEAD
 
 # The controller owns the final verification and push.
+git status --short --branch
+git diff --stat
+git diff
+git diff --check
 git push -u origin HEAD
 git status --short --branch
 git rev-parse HEAD
