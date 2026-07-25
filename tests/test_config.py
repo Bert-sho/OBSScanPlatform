@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from obs_scan_platform.config import load_config
+from obs_scan_platform.config import AppConfigFile, load_config
 
 
 def test_load_config_and_resolve_bucket_thresholds(tmp_path: Path):
@@ -48,6 +48,47 @@ applications:
     assert app_config.appid == "app.one"
     assert config.thresholds_for(app_config, "bucket-a").large_directory_bytes == 200
     assert config.thresholds_for(app_config, "bucket-missing").large_directory_bytes == 100
+
+
+def test_empty_config_loads_all_global_defaults(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text("", encoding="utf-8")
+
+    config = load_config(config_file)
+
+    assert config.endpoint == ""
+    assert config.applications == []
+    assert config.scan.results_dir == "results"
+    assert config.scan.objectkeys_concurrency_limit() == 30
+    assert config.defaults.large_directory_bytes == 107374182400
+    assert config.defaults.large_file_bytes == 10737418240
+    assert config.defaults.inactive_directory_days == 180
+    assert config.defaults.filelist_depth == 5
+
+
+def test_partial_application_and_bucket_load_missing_defaults(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+applications:
+  - buckets:
+      bucket-a: {}
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+    application = config.applications[0]
+
+    assert application.appid == ""
+    assert application.name == ""
+    assert application.endpoint == "http://obs.global"
+    assert application.apptoken == ""
+    assert application.enabled is True
+    assert application.scan_shared_buckets is False
+    assert config.bucket_enabled(application, "bucket-a") is True
+    assert config.thresholds_for(application, "bucket-a") == config.defaults
 
 
 def test_scan_settings_new_concurrency_defaults(tmp_path: Path):
@@ -258,24 +299,53 @@ applications:
     assert config.thresholds_for(application, "missing-bucket").filelist_depth == 5
 
 
-def test_load_config_requires_some_endpoint(tmp_path: Path):
+def test_explicit_application_endpoint_wins_over_global(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+applications:
+  - endpoint: http://obs.application
+""",
+        encoding="utf-8",
+    )
+    config = load_config(config_file)
+    assert config.applications[0].endpoint == "http://obs.application"
+    assert config.endpoint_for(config.applications[0]) == "http://obs.application"
+
+
+def test_null_application_endpoint_inherits_global(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+endpoint: http://obs.global
+applications:
+  - endpoint: null
+""",
+        encoding="utf-8",
+    )
+    config = load_config(config_file)
+    assert config.applications[0].endpoint == "http://obs.global"
+
+
+def test_null_non_nullable_default_is_rejected(tmp_path: Path):
     config_file = tmp_path / "apps.yaml"
     config_file.write_text(
         """
 defaults:
-  large_directory_bytes: 100
-  large_file_bytes: 10
-  inactive_directory_days: 180
-applications:
-  - appid: app.one
-    name: App One
-    apptoken: secret-token
+  large_file_bytes: null
 """,
         encoding="utf-8",
     )
 
-    with pytest.raises(ValidationError, match="endpoint"):
+    with pytest.raises(ValidationError):
         load_config(config_file)
+
+
+def test_missing_scan_fields_reports_only_operational_identity():
+    config = AppConfigFile(applications=[{}])
+    application = config.applications[0]
+    assert config.missing_scan_fields(application) == ["endpoint", "appid", "apptoken"]
 
 
 def test_bucket_override_can_set_only_filelist_depth(tmp_path: Path):

@@ -32,13 +32,14 @@ class ScanSettings(BaseModel):
 
 
 class Thresholds(BaseModel):
-    large_directory_bytes: int
-    large_file_bytes: int
-    inactive_directory_days: int
+    large_directory_bytes: int = 107374182400
+    large_file_bytes: int = 10737418240
+    inactive_directory_days: int = 180
     filelist_depth: int = 5
 
 
 class BucketOverrides(BaseModel):
+    enable: bool = True
     large_directory_bytes: int | None = None
     large_file_bytes: int | None = None
     inactive_directory_days: int | None = None
@@ -46,29 +47,28 @@ class BucketOverrides(BaseModel):
 
 
 class ApplicationConfig(BaseModel):
-    appid: str
-    name: str
-    endpoint: str | None = None
-    apptoken: str
+    appid: str = ""
+    name: str = ""
+    endpoint: str | None = ""
+    apptoken: str = ""
     enabled: bool = True
     scan_shared_buckets: bool = False
     buckets: dict[str, BucketOverrides] = Field(default_factory=dict)
 
 
 class AppConfigFile(BaseModel):
-    endpoint: str | None = None
+    endpoint: str | None = ""
     scan: ScanSettings = Field(default_factory=ScanSettings)
-    defaults: Thresholds
-    applications: list[ApplicationConfig]
+    defaults: Thresholds = Field(default_factory=Thresholds)
+    applications: list[ApplicationConfig] = Field(default_factory=list)
     source_path: Path | None = None
 
     @model_validator(mode="after")
-    def validate_endpoint_config(self) -> "AppConfigFile":
-        if self.endpoint is not None:
-            return self
-        missing = [application.appid for application in self.applications if application.endpoint is None]
-        if missing:
-            raise ValueError("endpoint must be configured globally or for each application")
+    def inherit_global_endpoint(self) -> "AppConfigFile":
+        if (self.endpoint or "").strip():
+            for application in self.applications:
+                if not (application.endpoint or "").strip():
+                    application.endpoint = self.endpoint
         return self
 
     def enabled_applications(self) -> list[ApplicationConfig]:
@@ -88,10 +88,19 @@ class AppConfigFile(BaseModel):
         return Thresholds.model_validate(values)
 
     def endpoint_for(self, application: ApplicationConfig) -> str:
-        endpoint = self.endpoint or application.endpoint
-        if endpoint is None:
-            raise ValueError("endpoint must be configured globally or for the application")
-        return endpoint
+        return application.endpoint or self.endpoint or ""
+
+    def missing_scan_fields(self, application: ApplicationConfig) -> list[str]:
+        values = {
+            "endpoint": self.endpoint_for(application),
+            "appid": application.appid,
+            "apptoken": application.apptoken,
+        }
+        return [name for name, value in values.items() if not value.strip()]
+
+    def bucket_enabled(self, application: ApplicationConfig, bucket_name: str) -> bool:
+        override = application.buckets.get(bucket_name)
+        return override is None or override.enable
 
     def masked_dict(self) -> dict[str, Any]:
         data = self.model_dump(mode="json", exclude={"source_path"})
