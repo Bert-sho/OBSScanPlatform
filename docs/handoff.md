@@ -21,7 +21,7 @@
 
 ## Latest commit after this session
 
-Pending local commit with message `fix: correct objectkeys bucketId parameter`; this implementer must not push. Resolve the commit hash with `git rev-parse HEAD` after committing.
+`e441373f6b5bfb67a98e3a47a5a29725f05c53cd` (`fix: correct objectkeys bucketId parameter`). The local branch is one commit ahead of `origin/codex/obs-scan-platform`; controller review and push remain pending. This implementer must not push.
 
 ## Summary of what changed
 
@@ -60,7 +60,7 @@ Pending local commit with message `fix: correct objectkeys bucketId parameter`; 
 
 ## Uncommitted changes, if any
 
-At this handoff snapshot, the objectkeys implementation, test assertions, required documentation, and the already-created plan are staged for local review and commit. The task report under `.superpowers/sdd/2026-07-28-objectkeys-bucket-id/` is Git-ignored.
+The objectkeys implementation, tests, required documentation, and plan are committed locally in `e441373f6b5bfb67a98e3a47a5a29725f05c53cd`. At this handoff snapshot, only this handoff correction is uncommitted; the task report under `.superpowers/sdd/2026-07-28-objectkeys-bucket-id/` is Git-ignored.
 
 ## Exact resume instructions for the next Codex session
 
@@ -72,9 +72,8 @@ git status --short --branch
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
 git diff --check
-git add .
-git commit -m "fix: correct objectkeys bucketId parameter"
-git rev-parse HEAD
+git log -1 --oneline
+git status --short --branch
 ```
 
-Do not push from the implementer task. If the full suite still has the five documented Windows baseline failures, preserve `wip` and do not claim full-suite success.
+Do not create a duplicate objectkeys commit. Controller review and push are pending; do not push from the implementer task. If the full suite still has the five documented Windows baseline failures, preserve `wip` and do not claim full-suite success.
