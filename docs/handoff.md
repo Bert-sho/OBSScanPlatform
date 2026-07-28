@@ -21,7 +21,7 @@
 
 ## Latest commit after this session
 
-The implementer will create the local commit `fix: correct metadata bucketId parameter` after final diff inspection. The controller owns final verification and push; no push has been attempted by the implementer.
+`8eacce4cfc7c33a56a1ff458eeb429d590e43542` (`fix: correct metadata bucketId parameter`) is the latest metadata task commit and represents the one task commit ahead of `origin/codex/obs-scan-platform`. This follow-up handoff-correction commit is separate; the current local branch is two commits ahead. Controller review and push are pending. No push has been attempted by the implementer.
 
 ## Summary of what changed
 
@@ -60,7 +60,7 @@ The implementer will create the local commit `fix: correct metadata bucketId par
 
 ## Uncommitted changes, if any
 
-At handoff writing time, task changes are uncommitted: metadata production/test updates, the end-to-end metadata fixture update, the plan, and these two handoff documents. The task report is Git-ignored under `.superpowers/sdd/`.
+The metadata task changes are committed in `8eacce4cfc7c33a56a1ff458eeb429d590e43542`; the metadata task itself is one commit ahead of `origin/codex/obs-scan-platform`. This follow-up handoff correction is a second local commit, so the current local branch is two commits ahead. Controller review and push are pending. The task report is Git-ignored under `.superpowers/sdd/`.
 
 ## Exact resume instructions for the next Codex session
 
@@ -74,8 +74,6 @@ git diff
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scanner.py tests/test_scan_end_to_end.py -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
-git add .
-git commit -m "fix: correct metadata bucketId parameter"
 # Controller only: git push -u origin HEAD
 ```
 
