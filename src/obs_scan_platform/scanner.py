@@ -757,7 +757,7 @@ class Scanner:
                             "bucketid": bucket.name,
                             "apptoken": application.apptoken,
                             "objectkey": encode_object_key("/" + object_key.lstrip("/")),
-                            "bucketld": bucket.bucket_id,
+                            "bucketId": bucket.bucket_id,
                         },
                         headers=JSON_HEADERS,
                         endpoint="metadata",

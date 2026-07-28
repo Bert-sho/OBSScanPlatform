@@ -104,7 +104,8 @@ class FakeOBSClient:
 
         if url.endswith("/rest/boto3/s3/object/metadata"):
             assert params["bucketid"] == "owned-bucket"
-            assert params["bucketld"] == "owned-id"
+            assert params["bucketId"] == "owned-id"
+            assert "bucketld" not in params
             object_key = _decode_base64_text(params["objectkey"]).lstrip("/")
             assert object_key in {"root.txt", "alpha/direct.txt"}
             return {

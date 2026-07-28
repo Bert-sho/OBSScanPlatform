@@ -1793,7 +1793,7 @@ async def test_run_starts_all_application_enumerations_without_app_limit(
 
 
 @pytest.mark.asyncio
-async def test_collect_metadata_files_uses_bucket_name_as_bucketid_and_writes_csv(tmp_path: Path):
+async def test_collect_metadata_files_uses_correct_bucket_query_fields_and_writes_csv(tmp_path: Path):
     scanner, application, bucket = make_scanner()
     client = FakeClient([{"result": {"objectKey": {"objectKey": "root.txt", "size": "12", "lastModifyTime": "1000"}}}])
 
@@ -1807,8 +1807,10 @@ async def test_collect_metadata_files_uses_bucket_name_as_bucketid_and_writes_cs
     )
 
     call = client.calls[0]
-    assert call["params"]["bucketid"] == bucket.name
-    assert call["params"]["bucketld"] == bucket.bucket_id
+    params = call["params"]
+    assert params["bucketid"] == bucket.name
+    assert params.get("bucketId") == bucket.bucket_id
+    assert "bucketld" not in params
     rows = list(csv.DictReader((tmp_path / "metadata_files.csv").open(newline="", encoding="utf-8")))
     assert rows == [{"object_key": "root.txt", "size_bytes": "12", "last_modified_ms": "1000"}]
 
