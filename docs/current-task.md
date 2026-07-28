@@ -12,7 +12,7 @@ Correct and verify the metadata `bucketId` query contract
 
 `wip`
 
-The metadata-contract change is ready for controller review. This remains `wip` because the repository retains five known Windows full-suite baseline failures.
+The metadata-contract change is implemented, reviewed, and pushed. This remains `wip` solely because the repository retains five known Windows full-suite baseline failures.
 
 ## User goal
 
@@ -25,10 +25,13 @@ Send the bucket internal ID to `/rest/boto3/s3/object/metadata` using `bucketId`
 - Changed only the metadata request parameter in `Scanner._collect_metadata_files` from `bucketld` to `bucketId`.
 - Updated the end-to-end fake metadata endpoint to enforce the corrected contract; its objectkeys assertions still use `bucketld`.
 - Added the implementation plan and recorded this self-contained handoff.
+- Completed task-level review and final review: Critical 0, Important 0, Minor 0; ready to push.
+- Pushed `codex/obs-scan-platform` through `e55e93ff49749bc04a65f85f5246793a08cb673f`.
 
 ## Remaining work
 
-- Controller review, final verification, and push only. The implementer has not pushed.
+- No metadata-contract work remains.
+- Address the five unrelated Windows portability/environment failures in a separate task before repository policy permits status `completed`.
 
 ## Key files changed
 
@@ -51,11 +54,12 @@ Send the bucket internal ID to `/rest/boto3/s3/object/metadata` using `bucketId`
 ## Validation result
 
 - RED command failed as intended: `params.get("bucketId")` was `None`, expected `'bucket-id-1'`.
-- Focused regression: `1 passed in 0.31s` after the fix.
-- Relevant scanner and end-to-end suites: `96 passed in 1.68s`.
-- Full suite: `215 passed, 5 failed, 1 warning in 4.28s`; all five failures match the documented Windows baseline.
+- Fresh focused regression: `1 passed in 0.34s` after the fix.
+- Fresh relevant scanner and end-to-end suites: `96 passed in 1.74s`.
+- Fresh full suite: `215 passed, 5 failed, 1 warning in 5.20s`; all five failures match the documented Windows baseline.
 - `compileall` passed.
-- The repository's five pre-existing Windows full-suite failures remain a known baseline and must be rechecked by the controller before marking the task complete.
+- `git diff --check a4bf0c3..e55e93f` passed.
+- Final review found no Critical, Important, or Minor issues.
 
 ## Known risks
 
@@ -64,4 +68,4 @@ Send the bucket internal ID to `/rest/boto3/s3/object/metadata` using `bucketId`
 
 ## Next recommended action
 
-Review the local commit, run final verification including the full suite if required, then push `codex/obs-scan-platform` from the controller session.
+Create a separate Windows portability task for the five baseline failures; that is the only remaining prerequisite for repository status `completed`.
