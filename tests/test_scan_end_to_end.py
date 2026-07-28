@@ -120,7 +120,8 @@ class FakeOBSClient:
 
         if url.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
             assert params["bucketid"] == "owned-bucket"
-            assert params["bucketld"] == "owned-id"
+            assert params["bucketId"] == "owned-id"
+            assert "bucketld" not in params
             prefix = _decode_base64_text(params["objectkey"])
             if prefix == "/alpha/beta/":
                 return {
@@ -257,7 +258,8 @@ class SharedBucketOBSClient(FakeOBSClient):
         if url.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
             objectkey = _decode_base64_text(params["objectkey"])
             if params["bucketid"] == "owned-bucket":
-                assert params["bucketld"] == "owned-id"
+                assert params["bucketId"] == "owned-id"
+                assert "bucketld" not in params
                 assert objectkey == "/owned-prefix/"
                 return {
                     "result": {
@@ -268,7 +270,8 @@ class SharedBucketOBSClient(FakeOBSClient):
                     }
                 }
             assert params["bucketid"] == "reader-shared-bucket"
-            assert params["bucketld"] == "reader-shared-id"
+            assert params["bucketId"] == "reader-shared-id"
+            assert "bucketld" not in params
             assert objectkey == "/reader-shared-prefix/"
             return {
                 "result": {
@@ -679,8 +682,8 @@ async def test_scanner_run_includes_non_owner_shared_bucket_when_enabled(tmp_pat
         _decode_base64_json(call["params"]["requestbody"])["id"] == "reader-shared-id"
         for call in filelist_calls
     )
-    assert any(
-        call["params"]["bucketid"] == "reader-shared-bucket"
-        and call["params"]["bucketld"] == "reader-shared-id"
-        for call in objectkeys_calls
+    shared_objectkeys_call = next(
+        call for call in objectkeys_calls if call["params"]["bucketid"] == "reader-shared-bucket"
     )
+    assert shared_objectkeys_call["params"]["bucketId"] == "reader-shared-id"
+    assert "bucketld" not in shared_objectkeys_call["params"]

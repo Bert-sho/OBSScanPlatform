@@ -1520,8 +1520,10 @@ async def test_scan_shared_bucket_treats_empty_objectkeys_success_false_as_empty
                 },
             )
         if request.url.path.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
-            assert request.url.params["bucketid"] == "shared-bucket"
-            assert request.url.params["bucketld"] == "shared-id"
+            params = request.url.params
+            assert params["bucketid"] == "shared-bucket"
+            assert params["bucketId"] == "shared-id"
+            assert "bucketld" not in params
             return httpx.Response(
                 200,
                 json={
@@ -2143,8 +2145,10 @@ async def test_collect_prefix_stops_when_truncated_string_false(tmp_path: Path):
 
     assert len(client.calls) == 1
     call = client.calls[0]
-    assert call["params"]["bucketid"] == bucket.name
-    assert call["params"]["bucketld"] == bucket.bucket_id
+    params = call["params"]
+    assert params["bucketid"] == bucket.name
+    assert params.get("bucketId") == bucket.bucket_id
+    assert "bucketld" not in params
 
 
 @pytest.mark.asyncio

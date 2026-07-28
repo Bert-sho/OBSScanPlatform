@@ -939,7 +939,7 @@ class Scanner:
                     "apptoken": application.apptoken,
                     "objectkey": encode_object_key("/" + prefix.lstrip("/")),
                     "nextmarker": next_marker,
-                    "bucketld": bucket.bucket_id,
+                    "bucketId": bucket.bucket_id,
                 },
                 headers=JSON_HEADERS,
                 endpoint="objectkeys",
