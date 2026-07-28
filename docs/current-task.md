@@ -12,7 +12,7 @@ Correct and verify the objectkeys `bucketId` query contract
 
 `wip`
 
-The objectkeys correction is complete locally. Status remains `wip` because the full suite retains five pre-existing Windows failures.
+The objectkeys correction is implemented, reviewed, and pushed. Status remains `wip` solely because the full suite retains five pre-existing Windows failures.
 
 ## User goal
 
@@ -26,10 +26,12 @@ Send the bucket internal ID to `/rest/boto3/s3/list/bucket/objectkeys` as `bucke
 - Updated every objectkeys request-boundary assertion in the scanner and end-to-end tests, including owned and shared buckets; metadata assertions and request construction remain unchanged.
 - Preserved objectkeys pagination (`nextmarker`) and all non-ID query fields unchanged.
 - Included the existing plan at `docs/superpowers/plans/2026-07-28-objectkeys-bucket-id.md`.
+- Completed task-level review and final review with no Critical or Important findings; the single stale-status Minor is corrected in the final documentation update.
+- Pushed `codex/obs-scan-platform` through `84450c5368b3cd1e51d585a77aa5e2060f70c53f`.
 
 ## Remaining work
 
-- Controller review, push, and any integration action are outside this implementer task.
+- No objectkeys-contract work remains.
 - Address the five unrelated Windows portability/environment failures in a separate task before marking the repository fully green.
 
 ## Key files changed
@@ -54,11 +56,12 @@ git diff --check
 ## Validation result
 
 - RED command: failed as intended with `assert None == 'bucket-id-1'` at `params.get("bucketId")`.
-- GREEN focused regression: `1 passed in 0.52s`.
-- Relevant scanner and end-to-end suites: `96 passed in 1.70s`.
-- Full suite: `215 passed, 5 failed, 1 warning in 4.00s`; failures are the documented Windows baseline.
+- Fresh GREEN focused regression: `1 passed in 0.41s`.
+- Fresh relevant scanner and end-to-end suites: `96 passed in 1.66s`.
+- Fresh full suite: `215 passed, 5 failed, 1 warning in 4.50s`; failures are the documented Windows baseline.
 - `compileall` passed.
-- Final diff, status, and diff-check review are pending the documentation update and local commit.
+- `git diff --check eccf3fe..84450c5` passed.
+- Final review found no Critical or Important issues; its only non-blocking stale-status Minor is corrected here.
 
 ## Known risks
 
@@ -67,4 +70,4 @@ git diff --check
 
 ## Next recommended action
 
-Review the local commit, then push `codex/obs-scan-platform` from the controller task. Keep `wip` until the five Windows baseline failures are separately addressed.
+Create a separate Windows portability task for the five baseline failures; that is the only remaining prerequisite for repository status `completed`.
