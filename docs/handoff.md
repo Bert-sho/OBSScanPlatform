@@ -21,7 +21,10 @@
 
 ## Latest commit after this session
 
-`e441373f6b5bfb67a98e3a47a5a29725f05c53cd` (`fix: correct objectkeys bucketId parameter`). The local branch is one commit ahead of `origin/codex/obs-scan-platform`; controller review and push remain pending. This implementer must not push.
+- `e441373f6b5bfb67a98e3a47a5a29725f05c53cd` — `fix: correct objectkeys bucketId parameter` (local task commit).
+- `2de871c83a1093c8650499a6c0fd7a03c0c01d36` — `docs: correct objectkeys handoff state` (first handoff correction).
+- This second handoff-correction commit is created after this content is written; resolve its immutable hash with `git log -1 --oneline` after committing.
+- Controller review and push remain pending. This implementer must not push.
 
 ## Summary of what changed
 
@@ -60,7 +63,7 @@
 
 ## Uncommitted changes, if any
 
-The objectkeys implementation, tests, required documentation, and plan are committed locally in `e441373f6b5bfb67a98e3a47a5a29725f05c53cd`. At this handoff snapshot, only this handoff correction is uncommitted; the task report under `.superpowers/sdd/2026-07-28-objectkeys-bucket-id/` is Git-ignored.
+No production or test changes remain uncommitted. The objectkeys implementation, tests, required documentation, and plan are committed locally in `e441373f6b5bfb67a98e3a47a5a29725f05c53cd`; the first handoff correction is committed in `2de871c83a1093c8650499a6c0fd7a03c0c01d36`. The task report under `.superpowers/sdd/2026-07-28-objectkeys-bucket-id/` is Git-ignored.
 
 ## Exact resume instructions for the next Codex session
 
