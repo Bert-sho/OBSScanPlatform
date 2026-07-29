@@ -419,36 +419,37 @@ class Scanner:
                 partial_errors,
             )
             phase_boundary = time.monotonic()
-            if overview_format == "csv":
-                aggregate_bucket(
-                    run_id=run_id,
-                    appid=application.appid,
-                    bucket_name=bucket.name,
-                    bucket_id=bucket.bucket_id,
-                    temp_dir=temp_dir,
-                    output_path=csv_output_path,
-                    thresholds=thresholds,
-                    scan_started_ms=scan_started_ms,
-                    max_directories_in_memory=self.config.scan.aggregation_max_directories_in_memory,
-                    keep_temp_files=self.config.scan.keep_temp_files,
-                )
-                csv_path = csv_output_path
-                overview_path = csv_output_path
-                overview_files = (csv_output_path,)
-            else:
-                overview_files = aggregate_bucket_parquet(
-                    appid=application.appid,
-                    bucket_name=bucket.name,
-                    bucket_id=bucket.bucket_id,
-                    temp_dir=temp_dir,
-                    output_dir=parquet_output_dir,
-                    scan_started_ms=scan_started_ms,
-                    max_depth=self.config.scan.max_depth,
-                    file_type_map=self.config.scan.file_type_map,
-                    max_directories_in_memory=self.config.scan.aggregation_max_directories_in_memory,
-                    keep_temp_files=self.config.scan.keep_temp_files,
-                )
-                overview_path = parquet_output_dir
+            async with self.phase_coordinator.aggregation():
+                if overview_format == "csv":
+                    aggregate_bucket(
+                        run_id=run_id,
+                        appid=application.appid,
+                        bucket_name=bucket.name,
+                        bucket_id=bucket.bucket_id,
+                        temp_dir=temp_dir,
+                        output_path=csv_output_path,
+                        thresholds=thresholds,
+                        scan_started_ms=scan_started_ms,
+                        max_directories_in_memory=self.config.scan.aggregation_max_directories_in_memory,
+                        keep_temp_files=self.config.scan.keep_temp_files,
+                    )
+                    csv_path = csv_output_path
+                    overview_path = csv_output_path
+                    overview_files = (csv_output_path,)
+                else:
+                    overview_files = aggregate_bucket_parquet(
+                        appid=application.appid,
+                        bucket_name=bucket.name,
+                        bucket_id=bucket.bucket_id,
+                        temp_dir=temp_dir,
+                        output_dir=parquet_output_dir,
+                        scan_started_ms=scan_started_ms,
+                        max_depth=self.config.scan.max_depth,
+                        file_type_map=self.config.scan.file_type_map,
+                        max_directories_in_memory=self.config.scan.aggregation_max_directories_in_memory,
+                        keep_temp_files=self.config.scan.keep_temp_files,
+                    )
+                    overview_path = parquet_output_dir
         except OBSRequestError as exc:
             ended_ms = _now_ms()
             bucket_ended = time.monotonic()

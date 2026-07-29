@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Add configurable Parquet bucket overview output
+Global aggregation request barrier
 
 ## Current branch
 
@@ -12,115 +12,86 @@ Add configurable Parquet bucket overview output
 
 `wip`
 
-The requested implementation and focused validation are complete. Repository
-policy prevents marking the task `completed` because the full Windows suite
-still has five pre-existing environment/portability failures; the feature
-suite has 193 passing tests and the Parquet API checks have 7 passing tests
-with one Windows symlink test skipped.
+The implementation and affected suites are complete. Repository policy keeps
+the task at `wip` because the full Windows suite retains five documented
+baseline failures.
 
 ## User goal
 
-Add a global YAML setting that selects mutually exclusive CSV or Parquet
-bucket overviews, defaulting to Parquet. Preserve the existing CSV behavior.
-Write Snappy Parquet parts with at most 50,000 rows, the required ten-field
-non-null schema, one-directory object attribution, configurable cutoff depth
-(default 4), configurable extension categories, and manifest-authorized part
-downloads.
+Use one scan-wide phase coordinator so every CSV and Parquet bucket
+aggregation waits for admitted OBS attempts to finish, prevents new attempts
+and retries while aggregation is pending, and serializes all queued
+aggregations before request admission resumes.
 
 ## Completed work
 
-- Added global `scan.overview_format`, `scan.max_depth`, and
-  `scan.file_type_map` settings. Parquet and depth 4 are the defaults; YAML
-  type-map entries merge over the exact built-in mapping.
-- Preserved the legacy CSV aggregation path unchanged when
-  `overview_format: csv` is selected.
-- Added a bounded external Parquet aggregator that:
-  - assigns each object to exactly one path;
-  - truncates deeper objects into the configured cutoff directory;
-  - calculates count, byte totals, maximum size, latest UTC date, current path
-    depth, and sorted JSON file categories;
-  - uses the UTC scan-start date when every contributing timestamp is absent
-    or invalid;
-  - writes Snappy parts of at most 50,000 rows;
-  - writes one typed zero-row part for an empty bucket;
-  - stages and atomically publishes each bucket output directory.
-- Added manifest fields `overview_format`, `overview_path`, and
-  `overview_files`; retained `csv_path` only for CSV compatibility.
-- Added a manifest-authorized Parquet part download API with traversal and
-  symlink protections.
-- Added TDD coverage for configuration, aggregation semantics, exact schema,
-  compression, splitting, empty buckets, publication failure, scanner
-  dispatch, manifests, and downloads.
-- Updated example YAML, English/Chinese README files, operator guide, package
-  description, architecture notes, approved design, and implementation plan.
-- Completed local whole-change review; no Critical or Important issue remains.
-- Pushed `codex/parquet-overview` to GitHub through `f2f0c0a`; the final
-  push-status record is committed and pushed as the last delivery action.
+- Task 1 created `ScanPhaseCoordinator` in commit `7ba14f8`.
+- Task 2 scoped every OBS HTTP attempt with that coordinator in commit
+  `783a111`.
+- Task 3 wraps the complete scanner CSV/Parquet dispatch in
+  `self.phase_coordinator.aggregation()` without changing the aggregator
+  argument lists or phase-boundary placement.
+- Added CSV and Parquet ordering tests that prove aggregation occurs inside
+  the global writer scope, plus end-to-end coverage that every application
+  client receives the same coordinator instance.
+- Documented the fixed single-aggregation behavior in both READMEs and the
+  scan-start guide.
 
 ## Remaining work
 
-- No implementation work remains for the requested feature.
-- The five unrelated Windows full-suite failures require a separate
-  portability task if repository-wide validation must become green.
-- A representative live OBS scan remains the recommended operational check.
+- Controller review, final whole-branch verification, and push are owned by
+  the parent task.
+- A representative live OBS scan remains an operational follow-up.
+- The five Windows portability failures require a separate task.
 
 ## Key files changed
 
-- `src/obs_scan_platform/config.py`
-- `src/obs_scan_platform/models.py`
-- `src/obs_scan_platform/parquet_aggregation.py`
 - `src/obs_scan_platform/scanner.py`
-- `src/obs_scan_platform/api.py`
-- `tests/test_config.py`
-- `tests/test_parquet_aggregation.py`
 - `tests/test_scanner.py`
-- `tests/test_api.py`
 - `tests/test_scan_end_to_end.py`
-- `pyproject.toml`
-- `config/apps.example.yaml`
 - `README.md`
 - `README.zh-CN.md`
-- `CLAUDE.md`
 - `docs/scan-start-guide.md`
-- `docs/superpowers/specs/2026-07-29-parquet-overview-design.md`
-- `docs/superpowers/plans/2026-07-29-parquet-overview.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
 ```powershell
+# RED
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scanner.py -q
+
+# GREEN and integration
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scanner.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scan_end_to_end.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scan_coordination.py tests/test_obs_client.py tests/test_scanner.py tests/test_scan_end_to_end.py tests/test_aggregation.py tests/test_parquet_aggregation.py -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_parquet_aggregation.py tests/test_aggregation.py tests/test_external_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_api.py -k parquet -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
 git diff --check
 ```
 
 ## Validation result
 
-- Fresh feature suite: `193 passed in 5.02s`.
-- Fresh Parquet API suite: `7 passed, 1 skipped, 19 deselected in 1.03s`;
-  the skip is the expected Windows symlink privilege case.
-- Fresh compilation: exited `0`.
-- Fresh full suite: `256 passed, 5 failed, 1 skipped, 1 warning in 6.46s`.
-  The five failures exactly match the pre-task Windows baseline: two symlink
-  privilege failures, CSV CRLF response normalization, backslash path
-  semantics, and CLI path-separator formatting.
-- `git diff --check` reported no whitespace errors.
+- RED: `2 failed, 93 passed`; both new ordering tests observed only the
+  aggregator event, proving the writer scope was absent.
+- GREEN: scanner `95 passed`; end-to-end `4 passed`; combined affected suite
+  `166 passed`.
+- Full suite: `264 passed, 5 failed, 1 skipped, 1 warning in 7.07s`.
+  The failures are the five known Windows-only baseline cases: two symlink
+  privilege tests, CSV CRLF response normalization, backslash path semantics,
+  and CLI path separator formatting.
+- `compileall` and `git diff --check` exited `0`.
+- Task-level review found no Critical or Important issue. Its one Minor test
+  gap (prove both configured application clients were constructed) was fixed.
 
 ## Known risks
 
-- No live OBS service scan was available; the end-to-end behavior is covered
-  with simulated service responses.
-- PyArrow is a new runtime dependency and increases installation size.
-- A bucket can contain more than 50,000 aggregate paths, so consumers must use
-  the ordered `overview_files` list instead of assuming a single part.
-- The five existing Windows portability failures remain outside this task.
+- No live OBS service was available; coverage uses controlled HTTP fakes.
+- The coordinator applies only to one `Scanner` run in one process; it does
+  not coordinate independent processes or scan runs.
+- Full-suite Windows baseline failures remain unrelated to this task.
 
 ## Next recommended action
 
-Deploy or install the updated dependency set, run a representative scan with
-the default Parquet configuration, inspect `manifest.json`, and download/read
-all listed parts. Address the existing Windows test failures in a separate
-task.
+Review the task commit and report, run the parent’s final whole-branch checks,
+then push `codex/parquet-overview` if the review finds no issue.

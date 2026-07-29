@@ -35,6 +35,7 @@ class FakeOBSClient:
 
     def __init__(self, **kwargs: Any) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.phase_coordinator = kwargs["phase_coordinator"]
         FakeOBSClient.instances.append(self)
 
     async def get_json(
@@ -430,7 +431,12 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
                 appid="app.one",
                 name="App One",
                 apptoken="token-1",
-            )
+            ),
+            ApplicationConfig(
+                appid="app.two",
+                name="App Two",
+                apptoken="token-2",
+            ),
         ],
     )
     config.scan.results_dir = str(tmp_path / "results")
@@ -440,9 +446,15 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
     config.scan.objectkeys_concurrency_per_bucket = 1
     config.scan.metadata_concurrency_per_bucket = 1
 
-    manifest = await Scanner(config).run(run_id="run-1")
+    scanner = Scanner(config)
+    manifest = await scanner.run(run_id="run-1")
 
     fake_client = FakeOBSClient.instances[0]
+    assert len(FakeOBSClient.instances) == len(config.applications)
+    assert all(
+        client.phase_coordinator is scanner.phase_coordinator
+        for client in FakeOBSClient.instances
+    )
     called_urls = [call["url"] for call in fake_client.calls]
     assert any(url.endswith("/rest/s3/listbuckets") for url in called_urls)
     assert any(url.endswith("/rest/s3/bucket/endpoint") for url in called_urls)

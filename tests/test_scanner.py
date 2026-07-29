@@ -5,6 +5,8 @@ import json
 import inspect
 import logging
 import shutil
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1566,6 +1568,7 @@ async def test_scan_application_applies_configured_httpx_keepalive_expiry(
     scanner.config.scan.request_timeout_seconds = 47
     scanner.config.scan.keepalive_expiry_seconds = 2.5
     captured: dict[str, object] = {}
+    captured_obs_client_kwargs: dict[str, object] = {}
 
     class CapturingAsyncClient:
         def __init__(self, **kwargs: object) -> None:
@@ -1580,7 +1583,12 @@ async def test_scan_application_applies_configured_httpx_keepalive_expiry(
     async def fake_list_buckets(application_config, client):
         return []
 
+    class CapturingOBSClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured_obs_client_kwargs.update(kwargs)
+
     monkeypatch.setattr("obs_scan_platform.scanner.httpx.AsyncClient", CapturingAsyncClient)
+    monkeypatch.setattr("obs_scan_platform.scanner.OBSClient", CapturingOBSClient)
     monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
 
     result = await scanner._scan_application(
@@ -1593,6 +1601,7 @@ async def test_scan_application_applies_configured_httpx_keepalive_expiry(
 
     assert result["status"] == ScanStatus.SUCCESS.value
     assert captured["timeout"] == 47
+    assert captured_obs_client_kwargs["phase_coordinator"] is scanner.phase_coordinator
     limits = captured["limits"]
     assert isinstance(limits, httpx.Limits)
     assert limits.max_connections == 100
@@ -2339,6 +2348,19 @@ async def test_scan_bucket_finishes_filelist_and_metadata_before_objectkeys(tmp_
     assert client.phase_events == ["bucket_endpoint", "filelist", "metadata", "objectkeys"]
 
 
+class RecordingAggregationCoordinator:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    @asynccontextmanager
+    async def aggregation(self) -> AsyncIterator[None]:
+        self.events.append("aggregation-scope-enter")
+        try:
+            yield
+        finally:
+            self.events.append("aggregation-scope-exit")
+
+
 @pytest.mark.asyncio
 async def test_scan_bucket_passes_aggregation_memory_and_retention_config(
     tmp_path: Path,
@@ -2349,9 +2371,12 @@ async def test_scan_bucket_passes_aggregation_memory_and_retention_config(
     scanner.config.scan.aggregation_max_directories_in_memory = 7
     scanner.config.scan.keep_temp_files = True
     calls: list[dict[str, Any]] = []
+    events: list[str] = []
+    scanner.phase_coordinator = RecordingAggregationCoordinator(events)
 
     def capture_aggregate_bucket(**kwargs):
         calls.append(kwargs)
+        events.append("csv-aggregate")
         return 0
 
     monkeypatch.setattr("obs_scan_platform.scanner.aggregate_bucket", capture_aggregate_bucket)
@@ -2369,6 +2394,11 @@ async def test_scan_bucket_passes_aggregation_memory_and_retention_config(
     assert len(calls) == 1
     assert calls[0]["max_directories_in_memory"] == 7
     assert calls[0]["keep_temp_files"] is True
+    assert events == [
+        "aggregation-scope-enter",
+        "csv-aggregate",
+        "aggregation-scope-exit",
+    ]
 
 
 class PartialBucketScanClient:
@@ -2677,6 +2707,48 @@ async def test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elap
     assert len(finish_messages) == 1
     assert "status=success" in finish_messages[0]
     assert "elapsed_seconds=" in finish_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_scan_bucket_aggregates_parquet_inside_global_writer_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, application, bucket = make_scanner()
+    events: list[str] = []
+    scanner.phase_coordinator = RecordingAggregationCoordinator(events)
+    scanner.config.scan.overview_format = "parquet"
+    part_path = tmp_path / application.appid / bucket.name / "part-00001.parquet"
+
+    def capture_parquet_aggregation(**kwargs):
+        events.append("parquet-aggregate")
+        return (part_path,)
+
+    monkeypatch.setattr(
+        "obs_scan_platform.scanner.aggregate_bucket_parquet",
+        capture_parquet_aggregation,
+    )
+
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        FakeClient(
+            [
+                {"result": "http://bucket-endpoint/"},
+                {"result": {"files": [], "nextOffset": ""}},
+            ]
+        ),
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+    )
+
+    assert events == [
+        "aggregation-scope-enter",
+        "parquet-aggregate",
+        "aggregation-scope-exit",
+    ]
+    assert result.overview_files == (part_path,)
 
 
 @pytest.mark.asyncio

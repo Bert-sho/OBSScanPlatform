@@ -96,6 +96,10 @@ Applications have no independent scan concurrency limit. `bucket_concurrency` is
 
 For each bucket, scanning completes all `filelist` discovery and metadata requests before starting `objectkeys` collection.
 
+### Global aggregation/request phase
+
+Aggregation concurrency is fixed at one across every application and bucket in a scan run. When aggregation waits, no new request attempt or retry starts; responses already admitted finish reading/parsing and their current synchronous page processing before aggregation begins. All queued CSV and Parquet aggregations then run serially, after which paused requests resume. This behavior is not a YAML option and does not coordinate independent processes or scan runs.
+
 ## Configuration Contract
 
 All modeled fields may be omitted. Defaults are applied by the configuration models and are visible through the masked `GET /config/apps` response. A missing field uses the defaults below; explicit `null` is still invalid for non-nullable fields.
