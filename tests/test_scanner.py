@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import httpx
+import pyarrow.parquet as pq
 import pytest
 
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, BucketOverrides, Thresholds
@@ -281,6 +282,7 @@ def make_scanner() -> tuple[Scanner, ApplicationConfig, BucketInfo]:
         ),
         applications=[application],
     )
+    config.scan.overview_format = "csv"
     bucket = BucketInfo("bucket-id-1", "bucket-name-1", "HEC", "cn-east-3", "owner", None)
     return Scanner(config), application, bucket
 
@@ -2659,6 +2661,9 @@ async def test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elap
 
     assert result.status == ScanStatus.SUCCESS
     assert result.csv_path == tmp_path / application.appid / f"{bucket.name}.csv"
+    assert result.overview_format == "csv"
+    assert result.overview_path == result.csv_path
+    assert result.overview_files == (result.csv_path,)
     with result.csv_path.open(newline="", encoding="utf-8") as file:
         rows = list(csv.reader(file))
     assert rows[0][0:3] == ["run_id", "appid", "bucket_name"]
@@ -2671,6 +2676,42 @@ async def test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elap
     assert len(finish_messages) == 1
     assert "status=success" in finish_messages[0]
     assert "elapsed_seconds=" in finish_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_scan_bucket_writes_default_parquet_overview_and_manifest_paths(tmp_path: Path):
+    scanner, application, bucket = make_scanner()
+    scanner.config.scan.overview_format = "parquet"
+    scanner.config.scan.max_depth = 4
+    client = FakeClient(
+        [
+            {"result": "http://bucket-endpoint/"},
+            {"result": {"files": [], "nextOffset": ""}},
+        ]
+    )
+
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        client,
+        "run-1",
+        tmp_path,
+        scan_started_ms=1_785_283_200_000,
+    )
+
+    overview_dir = tmp_path / application.appid / bucket.name
+    expected_part = overview_dir / "part-00001.parquet"
+    assert result.status == ScanStatus.SUCCESS
+    assert result.csv_path is None
+    assert result.overview_format == "parquet"
+    assert result.overview_path == overview_dir
+    assert result.overview_files == (expected_part,)
+    assert pq.read_table(expected_part).num_rows == 0
+    manifest = scanner._bucket_result_to_manifest(result)
+    assert manifest["overview_format"] == "parquet"
+    assert manifest["overview_path"] == str(overview_dir)
+    assert manifest["overview_files"] == [str(expected_part)]
+    assert manifest["csv_path"] is None
 
 
 @pytest.mark.asyncio

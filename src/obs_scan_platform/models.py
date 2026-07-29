@@ -277,6 +277,9 @@ class BucketScanResult:
     status: ScanStatus
     csv_path: Path | None
     thresholds: Thresholds
+    overview_format: str = "csv"
+    overview_path: Path | None = None
+    overview_files: tuple[Path, ...] = ()
     error: str | None = None
     partial_errors: PartialErrorSummary | None = None
     errors: list[RequestFailureDetail] = field(default_factory=list)

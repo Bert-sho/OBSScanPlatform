@@ -434,6 +434,7 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
         ],
     )
     config.scan.results_dir = str(tmp_path / "results")
+    config.scan.overview_format = "csv"
     config.scan.keep_temp_files = False
     config.scan.bucket_concurrency = 1
     config.scan.objectkeys_concurrency_per_bucket = 1
@@ -520,6 +521,7 @@ async def test_scanner_run_marks_bucket_partial_failed_and_keeps_csv(tmp_path: P
         applications=[ApplicationConfig(appid="app.one", name="App One", apptoken="token-1")],
     )
     config.scan.results_dir = str(tmp_path / "results")
+    config.scan.overview_format = "csv"
     config.scan.keep_temp_files = True
     config.scan.bucket_concurrency = 1
     config.scan.objectkeys_concurrency_per_bucket = 1
@@ -619,6 +621,7 @@ async def test_scanner_run_succeeds_with_empty_folder_and_header_only_csv(tmp_pa
         ],
     )
     config.scan.results_dir = str(tmp_path / "results")
+    config.scan.overview_format = "csv"
     config.scan.keep_temp_files = False
     config.scan.bucket_concurrency = 1
     config.scan.objectkeys_concurrency_per_bucket = 1

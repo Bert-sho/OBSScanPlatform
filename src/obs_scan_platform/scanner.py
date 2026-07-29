@@ -27,6 +27,7 @@ from obs_scan_platform.models import (
     _sanitize_reason,
 )
 from obs_scan_platform.obs_client import OBSClient, OBSRequestError, encode_object_key, encode_request_body
+from obs_scan_platform.parquet_aggregation import aggregate_bucket_parquet
 from obs_scan_platform.paths import prefix_temp_filename
 
 
@@ -271,6 +272,7 @@ class Scanner:
                                 status=ScanStatus.FAILED,
                                 csv_path=None,
                                 thresholds=self.config.thresholds_for(application, bucket.name),
+                                overview_format=self.config.scan.overview_format,
                                 error=str(exc),
                                 started_ms=started_ms,
                                 ended_ms=ended_ms,
@@ -382,7 +384,12 @@ class Scanner:
         thresholds = self.config.thresholds_for(application, bucket.name)
         partial_errors = PartialErrorSummary()
         temp_dir = results_dir / self.config.scan.temp_subdir / application.appid / bucket.name
-        output_path = results_dir / application.appid / f"{bucket.name}.csv"
+        overview_format = self.config.scan.overview_format
+        csv_output_path = results_dir / application.appid / f"{bucket.name}.csv"
+        parquet_output_dir = results_dir / application.appid / bucket.name
+        csv_path: Path | None = None
+        overview_path: Path | None = None
+        overview_files: tuple[Path, ...] = ()
         try:
             endpoint = await self._get_bucket_endpoint(application, bucket, client)
             discovery = await self._discover_root(
@@ -411,18 +418,36 @@ class Scanner:
                 partial_errors,
             )
             phase_boundary = time.monotonic()
-            aggregate_bucket(
-                run_id=run_id,
-                appid=application.appid,
-                bucket_name=bucket.name,
-                bucket_id=bucket.bucket_id,
-                temp_dir=temp_dir,
-                output_path=output_path,
-                thresholds=thresholds,
-                scan_started_ms=scan_started_ms,
-                max_directories_in_memory=self.config.scan.aggregation_max_directories_in_memory,
-                keep_temp_files=self.config.scan.keep_temp_files,
-            )
+            if overview_format == "csv":
+                aggregate_bucket(
+                    run_id=run_id,
+                    appid=application.appid,
+                    bucket_name=bucket.name,
+                    bucket_id=bucket.bucket_id,
+                    temp_dir=temp_dir,
+                    output_path=csv_output_path,
+                    thresholds=thresholds,
+                    scan_started_ms=scan_started_ms,
+                    max_directories_in_memory=self.config.scan.aggregation_max_directories_in_memory,
+                    keep_temp_files=self.config.scan.keep_temp_files,
+                )
+                csv_path = csv_output_path
+                overview_path = csv_output_path
+                overview_files = (csv_output_path,)
+            else:
+                overview_files = aggregate_bucket_parquet(
+                    appid=application.appid,
+                    bucket_name=bucket.name,
+                    bucket_id=bucket.bucket_id,
+                    temp_dir=temp_dir,
+                    output_dir=parquet_output_dir,
+                    scan_started_ms=scan_started_ms,
+                    max_depth=self.config.scan.max_depth,
+                    file_type_map=self.config.scan.file_type_map,
+                    max_directories_in_memory=self.config.scan.aggregation_max_directories_in_memory,
+                    keep_temp_files=self.config.scan.keep_temp_files,
+                )
+                overview_path = parquet_output_dir
         except OBSRequestError as exc:
             ended_ms = _now_ms()
             bucket_ended = time.monotonic()
@@ -441,6 +466,7 @@ class Scanner:
                 status=ScanStatus.FAILED,
                 csv_path=None,
                 thresholds=thresholds,
+                overview_format=overview_format,
                 error=str(exc),
                 partial_errors=partial_errors if partial_errors.has_errors() else None,
                 errors=[
@@ -473,6 +499,7 @@ class Scanner:
                 status=ScanStatus.FAILED,
                 csv_path=None,
                 thresholds=thresholds,
+                overview_format=overview_format,
                 error=str(exc),
                 partial_errors=partial_errors if partial_errors.has_errors() else None,
                 errors=list(partial_errors.errors),
@@ -502,8 +529,11 @@ class Scanner:
             bucket_name=bucket.name,
             bucket_id=bucket.bucket_id,
             status=status,
-            csv_path=output_path,
+            csv_path=csv_path,
             thresholds=thresholds,
+            overview_format=overview_format,
+            overview_path=overview_path,
+            overview_files=overview_files,
             error=partial_errors.summary_text(),
             partial_errors=partial_errors if partial_errors.has_errors() else None,
             errors=list(partial_errors.errors),
@@ -1000,11 +1030,19 @@ class Scanner:
         )
 
     def _bucket_result_to_manifest(self, result: BucketScanResult, temp_dir: Path | None = None) -> dict[str, Any]:
+        overview_path = result.overview_path
+        overview_files = result.overview_files
+        if result.overview_format == "csv" and result.csv_path is not None:
+            overview_path = overview_path or result.csv_path
+            overview_files = overview_files or (result.csv_path,)
         manifest = {
             "bucket_name": result.bucket_name,
             "bucket_id": result.bucket_id,
             "status": result.status.value,
             "csv_path": str(result.csv_path) if result.csv_path is not None else None,
+            "overview_format": result.overview_format,
+            "overview_path": str(overview_path) if overview_path is not None else None,
+            "overview_files": [str(path) for path in overview_files],
             "thresholds": result.thresholds.model_dump(mode="json"),
             "error": result.error,
             "errors": [error.to_manifest() for error in result.errors],
