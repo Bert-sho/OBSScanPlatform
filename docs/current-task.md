@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Global aggregation request barrier — final review fixes
+Global aggregation request barrier
 
 ## Current branch
 
@@ -12,46 +12,49 @@ Global aggregation request barrier — final review fixes
 
 `wip`
 
-The requested implementation and focused validation are complete. Repository
-policy keeps the task at `wip` because the full Windows suite retains the same
-five documented baseline failures.
+The implementation and reviews are complete. The status remains `wip` because
+the Windows full suite still has the same five documented pre-existing
+portability failures.
 
 ## User goal
 
-Give every individual `Scanner.run` its own aggregation/request coordinator,
-including concurrent runs on one `Scanner`; share that exact coordinator across
-the run's applications, clients, and buckets; keep request construction and
-response validation inside admission; and prove the composed barrier behavior
-through deterministic Scanner integration tests.
+Within each `Scanner.run`, allow only one bucket aggregation at a time across
+all applications, buckets, CSV, and Parquet. When any aggregation waits, drain
+already admitted HTTP attempts through request construction, send, validation,
+and JSON parsing; synchronously finish the returned page/objectkeys CSV work;
+then pause new attempts and retries until all queued aggregations finish.
+Paused requests must resume rather than be cancelled.
 
 ## Completed work
 
-- Moved `ScanPhaseCoordinator` construction from `Scanner.__init__` into
-  `Scanner.run`, then passed the run coordinator explicitly through
-  `_scan_application` and `_scan_bucket` to every `OBSClient` and aggregation.
-- Moved `http.build_request(...)` inside `request_attempt()` while preserving
-  raw request-construction error propagation and all existing retry behavior.
-- Added a simultaneous-two-run regression proving distinct run coordinators and
-  one shared identity for all application clients and buckets in each run.
-- Added event/queue-controlled Scanner integration cases using real
-  `OBSClient`, `httpx.AsyncClient`, and `ScanPhaseCoordinator` behavior. They
-  prove current-page conversion/CSV append precedes aggregation, request
-  admission pauses for waiting/active aggregation, cross-application writers
-  stay consecutive, and aggregation failure reopens admission.
-- Extended OBS request ordering coverage through request construction, send,
-  JSON parsing, business validation, and scope exit.
-- Kept HTTPX limits/timeouts/keep-alive, request concurrency, retry/backoff,
-  pagination, aggregation arguments, output, and failure behavior unchanged.
-- Corrected task/handoff architecture, file inventory, validation, and unpushed
-  state.
+- Added a writer-preferred `ScanPhaseCoordinator` that owns request capacity,
+  reader admission, and globally serialized aggregation admission.
+- Made coordinator ownership strictly per `Scanner.run`, including concurrent
+  calls on the same reusable `Scanner`.
+- Passed the exact run coordinator through every application/client/bucket and
+  both CSV/Parquet aggregation branches.
+- Kept each HTTP retry attempt admitted through request construction, response
+  body/status/business validation, and JSON parsing; retry backoff stays outside
+  admission.
+- Added cancellation/error cleanup tests and deterministic, event-controlled
+  Scanner integration coverage for synchronous page append, paused/resumed
+  requests, consecutive cross-application aggregations, aggregation failure,
+  and distinct concurrent-run coordinators.
+- Documented the behavior in English and Chinese operator documentation. No
+  aggregation-concurrency YAML option was added.
+- Completed task-level reviews, a final whole-branch review, one unified fix
+  wave, and one scoped re-review. The final re-review passed all findings with
+  no new Critical, Important, or Minor issue.
 
 ## Remaining work
 
-- Parent/controller final review and GitHub push.
-- A representative live OBS scan remains an operational follow-up.
-- The five unrelated Windows portability failures require a separate task.
+- At this document snapshot: commit this final handoff update and push
+  `codex/parquet-overview`. If this file is read from that remote branch, the
+  delivery push necessarily completed.
+- Run a representative live OBS scan when an environment is available.
+- Address the five unrelated Windows portability failures in a separate task.
 
-## Key files changed or directly relevant
+## Key files changed
 
 - `src/obs_scan_platform/scan_coordination.py`
 - `src/obs_scan_platform/obs_client.py`
@@ -60,8 +63,6 @@ through deterministic Scanner integration tests.
 - `tests/test_obs_client.py`
 - `tests/test_scanner.py`
 - `tests/test_scan_end_to_end.py`
-- `tests/test_aggregation.py`
-- `tests/test_parquet_aggregation.py`
 - `README.md`
 - `README.zh-CN.md`
 - `docs/scan-start-guide.md`
@@ -73,51 +74,38 @@ through deterministic Scanner integration tests.
 ## Validation commands run
 
 ```powershell
-# Run-local ownership RED / GREEN
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scan_end_to_end.py::test_concurrent_runs_on_one_scanner_use_distinct_run_coordinators -q
-
-# Request-construction ordering RED / GREEN
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_obs_client.py::test_get_json_builds_request_and_validates_response_inside_request_attempt -q
-
-# Event-controlled composed Scanner barrier cases
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scan_end_to_end.py::test_concurrent_runs_on_one_scanner_use_distinct_run_coordinators tests/test_scan_end_to_end.py::test_scanner_composed_barrier_orders_processing_aggregations_and_requests -q
-
-# Required focused suite
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scan_coordination.py tests/test_obs_client.py tests/test_scanner.py tests/test_scan_end_to_end.py tests/test_aggregation.py tests/test_parquet_aggregation.py -q
-
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
-git diff --check
+git diff --check efc8bf9..HEAD
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
 ```
 
 ## Validation result
 
-- Run-local RED: `1 failed in 0.60s`; bucket orchestration received no explicit
-  run coordinator and both runs used the Scanner-owned coordinator. GREEN:
-  `1 passed in 0.49s`.
-- Request-ordering RED: `1 failed in 0.23s`; `build-request` appeared before
-  `scope-enter`. GREEN: `1 passed in 0.16s`.
-- Final four new end-to-end cases: `4 passed in 0.45s`.
-- Required focused suite: `170 passed in 3.63s`.
-- Full suite: `268 passed, 5 failed, 1 skipped, 1 warning in 6.89s`.
-  Failures exactly match the documented Windows baseline: two symlink
+- Focused barrier suite: `170 passed in 3.51s`.
+- Compile validation: exit `0`.
+- Full task-range diff check: exit `0`.
+- Full suite: `268 passed, 5 failed, 1 skipped, 1 warning in 6.27s`.
+- The five failures exactly match the pre-task Windows baseline: two symlink
   privilege cases, CSV CRLF normalization, backslash path semantics, and CLI
-  path separator rendering.
-- `compileall` and `git diff --check` exited `0`; diff-check emitted only the
-  repository's LF-to-CRLF conversion warnings.
+  path-separator rendering.
 
 ## Known risks
 
-- No live OBS service was available; external HTTP and aggregation boundaries
-  use controlled fakes while Scanner, OBSClient, HTTPX request construction,
-  and coordinator orchestration remain real.
-- Coordination is intentionally per `Scanner.run` in one process; separate
-  runs and processes never share capacity or aggregation gating.
-- The full suite remains non-green only for the five unchanged Windows
-  baseline failures above.
+- No live OBS service was available; integration tests use controlled HTTP and
+  aggregation boundaries while Scanner, OBSClient, HTTPX request construction,
+  CSV page processing, and coordinator behavior remain real.
+- Coordination is intentionally local to one process and one `Scanner.run`;
+  independent runs and processes do not share a gate.
+- The ignored SDD task scratch directory remains local because its exact-path
+  cleanup was rejected by policy. It is absent from `git ls-files` and cannot
+  enter the delivery.
+- The repository-wide Windows suite remains non-green only for the five
+  unchanged baseline failures.
 
 ## Next recommended action
 
-Review the final local commit and ignored final-fix report, then push
-`codex/parquet-overview` if no issue remains. Do not rerun or suppress the five
-unrelated Windows failures as part of this task.
+If working from the local pre-push checkout, commit this handoff update and push
+`codex/parquet-overview`. If working from the remote branch containing this
+file, perform a representative live OBS scan or open a separate portability
+task for the five baseline failures.
