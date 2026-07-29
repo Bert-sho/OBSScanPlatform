@@ -2,6 +2,7 @@ import json
 import importlib
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 import obs_scan_platform.api as api
@@ -154,6 +155,122 @@ def test_bucket_csv_downloads_file(tmp_path: Path):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     assert response.text == "name,size\nfile.txt,1\n"
+
+
+def _write_parquet_manifest(
+    results_dir: Path,
+    *,
+    overview_format: str = "parquet",
+    listed_parts: list[Path] | None = None,
+) -> Path:
+    run_dir = results_dir / "run-1"
+    bucket_dir = run_dir / "app-1" / "bucket-a"
+    bucket_dir.mkdir(parents=True, exist_ok=True)
+    if listed_parts is None:
+        listed_parts = [bucket_dir / "part-00001.parquet"]
+    manifest = {
+        "run_id": "run-1",
+        "applications": [
+            {
+                "appid": "app-1",
+                "buckets": [
+                    {
+                        "bucket_name": "bucket-a",
+                        "overview_format": overview_format,
+                        "overview_path": str(bucket_dir),
+                        "overview_files": [str(path) for path in listed_parts],
+                    }
+                ],
+            }
+        ],
+    }
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return bucket_dir
+
+
+def test_bucket_parquet_downloads_manifest_listed_part(tmp_path: Path):
+    bucket_dir = _write_parquet_manifest(tmp_path)
+    (bucket_dir / "part-00001.parquet").write_bytes(b"parquet-data")
+    client = TestClient(api.create_app(results_dir=tmp_path))
+
+    response = client.get(
+        "/runs/run-1/apps/app-1/buckets/bucket-a/parquet/part-00001.parquet"
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"parquet-data"
+    assert response.headers["content-type"] == "application/vnd.apache.parquet"
+
+
+@pytest.mark.parametrize("part_name", ["part-1.parquet", "part-00001.csv", "part-00002.parquet"])
+def test_bucket_parquet_rejects_invalid_or_unlisted_part(tmp_path: Path, part_name: str):
+    bucket_dir = _write_parquet_manifest(tmp_path)
+    (bucket_dir / "part-00001.parquet").write_bytes(b"listed")
+    (bucket_dir / "part-00002.parquet").write_bytes(b"unlisted")
+    client = TestClient(api.create_app(results_dir=tmp_path))
+
+    response = client.get(
+        f"/runs/run-1/apps/app-1/buckets/bucket-a/parquet/{part_name}"
+    )
+
+    assert response.status_code == 404
+    assert b"unlisted" not in response.content
+
+
+def test_bucket_parquet_rejects_csv_overview_manifest(tmp_path: Path):
+    bucket_dir = _write_parquet_manifest(tmp_path, overview_format="csv")
+    (bucket_dir / "part-00001.parquet").write_bytes(b"parquet-data")
+    client = TestClient(api.create_app(results_dir=tmp_path))
+
+    response = client.get(
+        "/runs/run-1/apps/app-1/buckets/bucket-a/parquet/part-00001.parquet"
+    )
+
+    assert response.status_code == 404
+
+
+def test_bucket_parquet_rejects_missing_listed_file(tmp_path: Path):
+    _write_parquet_manifest(tmp_path)
+    client = TestClient(api.create_app(results_dir=tmp_path))
+
+    response = client.get(
+        "/runs/run-1/apps/app-1/buckets/bucket-a/parquet/part-00001.parquet"
+    )
+
+    assert response.status_code == 404
+
+
+def test_bucket_parquet_rejects_path_traversal(tmp_path: Path):
+    results_dir = tmp_path / "results"
+    bucket_dir = _write_parquet_manifest(results_dir)
+    (bucket_dir / "part-00001.parquet").write_bytes(b"listed")
+    (results_dir / "run-1" / "app-1" / "external.parquet").write_bytes(b"external")
+    client = TestClient(api.create_app(results_dir=results_dir))
+
+    response = client.get(
+        "/runs/run-1/apps/app-1/buckets/bucket-a/parquet/%2E%2E%2Fexternal.parquet"
+    )
+
+    assert response.status_code in {400, 404}
+    assert b"external" not in response.content
+
+
+def test_bucket_parquet_rejects_symlinked_part(tmp_path: Path):
+    bucket_dir = _write_parquet_manifest(tmp_path)
+    outside = tmp_path / "outside.parquet"
+    outside.write_bytes(b"external")
+    try:
+        (bucket_dir / "part-00001.parquet").symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    client = TestClient(api.create_app(results_dir=tmp_path))
+
+    response = client.get(
+        "/runs/run-1/apps/app-1/buckets/bucket-a/parquet/part-00001.parquet"
+    )
+
+    assert response.status_code == 404
+    assert b"external" not in response.content
 
 
 def test_run_detail_rejects_path_traversal(tmp_path: Path):

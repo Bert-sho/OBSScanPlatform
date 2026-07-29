@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -7,6 +8,9 @@ from fastapi.responses import FileResponse, PlainTextResponse
 
 from obs_scan_platform.config import load_config
 from obs_scan_platform.scanner import run_scan
+
+
+_PARQUET_PART_PATTERN = re.compile(r"part-\d{5}\.parquet")
 
 
 def _safe_segment(name: str) -> str:
@@ -30,6 +34,36 @@ def _read_manifest(run_dir: Path) -> dict:
     if not manifest_path.exists():
         raise HTTPException(status_code=404, detail="run manifest not found")
     return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def _bucket_manifest(manifest: dict, appid: str, bucket_name: str) -> dict | None:
+    applications = manifest.get("applications")
+    if not isinstance(applications, list):
+        return None
+    for application in applications:
+        if not isinstance(application, dict) or application.get("appid") != appid:
+            continue
+        buckets = application.get("buckets")
+        if not isinstance(buckets, list):
+            return None
+        for bucket in buckets:
+            if isinstance(bucket, dict) and bucket.get("bucket_name") == bucket_name:
+                return bucket
+    return None
+
+
+def _resolved_manifest_paths(values: object) -> set[Path]:
+    if not isinstance(values, list):
+        return set()
+    resolved: set[Path] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        path = Path(value)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        resolved.add(path.resolve())
+    return resolved
 
 
 def create_app(config_path: Path | None = None, results_dir: Path | None = None) -> FastAPI:
@@ -82,6 +116,46 @@ def create_app(config_path: Path | None = None, results_dir: Path | None = None)
         if not csv_path.exists():
             raise HTTPException(status_code=404, detail="bucket csv not found")
         return FileResponse(csv_path, media_type="text/csv", filename=f"{bucket_name}.csv")
+
+    @app.get(
+        "/runs/{run_id}/apps/{appid}/buckets/{bucket_name}/parquet/{part_name}"
+    )
+    def bucket_parquet_part(
+        run_id: str,
+        appid: str,
+        bucket_name: str,
+        part_name: str,
+    ) -> FileResponse:
+        if _PARQUET_PART_PATTERN.fullmatch(part_name) is None:
+            raise HTTPException(status_code=404, detail="bucket parquet part not found")
+
+        run_dir = _safe_child(configured_results_dir, run_id)
+        manifest_bucket = _bucket_manifest(_read_manifest(run_dir), appid, bucket_name)
+        if manifest_bucket is None or manifest_bucket.get("overview_format") != "parquet":
+            raise HTTPException(status_code=404, detail="bucket parquet part not found")
+
+        bucket_dir = _safe_child(configured_results_dir, run_id, appid, bucket_name)
+        candidate = bucket_dir / _safe_segment(part_name)
+        if candidate.is_symlink():
+            raise HTTPException(status_code=404, detail="bucket parquet part not found")
+        parquet_path = _safe_child(
+            configured_results_dir,
+            run_id,
+            appid,
+            bucket_name,
+            part_name,
+        )
+        if (
+            parquet_path not in _resolved_manifest_paths(manifest_bucket.get("overview_files"))
+            or not parquet_path.is_file()
+            or parquet_path.is_symlink()
+        ):
+            raise HTTPException(status_code=404, detail="bucket parquet part not found")
+        return FileResponse(
+            parquet_path,
+            media_type="application/vnd.apache.parquet",
+            filename=part_name,
+        )
 
     async def _run_scan_background() -> None:
         try:
