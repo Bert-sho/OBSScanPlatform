@@ -85,6 +85,8 @@ scan:
   objectkeys_concurrency_per_bucket: 30
 ```
 
+`scan.keepalive_expiry_seconds` 默认值为 `5.0` 秒，用于使连接池中的空闲连接过期；它不会在五秒后终止活动请求，会继续启用连接复用，并与现有重试路径协同工作。
+
 应用没有独立的扫描并发限制。`bucket_concurrency` 是所有应用共享的单次运行全局桶并发限制，覆盖每个桶从开始扫描到临时目录最终处理完成的完整生命周期。各应用的 `listbuckets` 不占用桶并发容量，但与其他所有 HTTP 请求一样占用 `global_request_concurrency` 容量。
 
 `metadata_concurrency_per_bucket` 和 `objectkeys_concurrency_per_bucket` 分别限制单个桶内对应 worker 的并发；`filelist` 和 metadata 请求仍受全局请求并发限制。旧配置项 `per_bucket_prefix_concurrency` 仍兼容，但新配置建议使用 `objectkeys_concurrency_per_bucket`。

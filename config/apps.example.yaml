@@ -10,6 +10,7 @@ scan:
   objectkeys_concurrency_per_bucket: 30
   metadata_concurrency_per_bucket: 8
   request_timeout_seconds: 30
+  keepalive_expiry_seconds: 5.0
   max_retries: 3
   retry_base_delay_seconds: 2
   retry_max_delay_seconds: 60

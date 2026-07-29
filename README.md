@@ -121,12 +121,15 @@ All modeled fields may be omitted. Defaults are applied by the configuration mod
 | `objectkeys_concurrency_per_bucket` | `null` | Uses this value when set; otherwise uses `per_bucket_prefix_concurrency`; when both are absent/`null`, the effective limit is `30` |
 | `metadata_concurrency_per_bucket` | `8` | — |
 | `request_timeout_seconds` | `30` | — |
+| `keepalive_expiry_seconds` | `5.0` | Expires idle pooled connections; must be positive |
 | `max_retries` | `3` | Three retries after the initial attempt |
 | `retry_base_delay_seconds` | `2` | — |
 | `retry_max_delay_seconds` | `60` | — |
 | `filelist_task_limit_per_bucket` | `100` | — |
 | `metadata_task_limit_per_bucket` | `10000` | — |
 | `aggregation_max_directories_in_memory` | `100000` | Must be positive |
+
+`keepalive_expiry_seconds` controls how long idle pooled connections may remain reusable. Its `5.0`-second default expires idle pooled connections; it does not terminate an active request after five seconds, keeps connection reuse enabled, and works alongside the existing retry path.
 
 ### Global threshold defaults
 

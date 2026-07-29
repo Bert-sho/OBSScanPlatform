@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Correct and verify the objectkeys `bucketId` query contract
+Configure and verify HTTPX keep-alive expiry
 
 ## Current branch
 
@@ -12,62 +12,68 @@ Correct and verify the objectkeys `bucketId` query contract
 
 `wip`
 
-The objectkeys correction is implemented, reviewed, and pushed. Status remains `wip` solely because the full suite retains five pre-existing Windows failures.
+Implementation and focused validation are complete. Repository-wide validation retains five documented Windows baseline failures, so this task is not marked `completed`.
 
 ## User goal
 
-Send the bucket internal ID to `/rest/boto3/s3/list/bucket/objectkeys` as `bucketId`, retain `bucketid` as the bucket-name field, leave metadata request construction unchanged, and preserve pagination and all other objectkeys fields.
+Expose a positive `scan.keepalive_expiry_seconds` YAML setting, default it to `5.0`, and apply it to each per-application HTTPX client's idle connection-pool expiry without changing timeout, retry, concurrency, or connection-count behavior.
 
 ## Completed work
 
-- Added the focused outbound-boundary regression assertion for `bucketid`, `bucketId`, and absence of `bucketld`.
-- Verified RED: the focused test failed with `params.get("bucketId")` equal to `None` before the production fix.
-- Changed only `Scanner._collect_prefix`'s objectkeys internal-ID key from `bucketld` to `bucketId`.
-- Updated every objectkeys request-boundary assertion in the scanner and end-to-end tests, including owned and shared buckets; metadata assertions and request construction remain unchanged.
-- Preserved objectkeys pagination (`nextmarker`) and all non-ID query fields unchanged.
-- Included the existing plan at `docs/superpowers/plans/2026-07-28-objectkeys-bucket-id.md`.
-- Completed task-level review and final review with no Critical or Important findings; the single stale-status Minor is corrected in the final documentation update.
-- Pushed `codex/obs-scan-platform` through `84450c5368b3cd1e51d585a77aa5e2060f70c53f`.
+- Added `ScanSettings.keepalive_expiry_seconds: float = Field(default=5.0, gt=0)`.
+- Passed the configured value to `httpx.Limits(keepalive_expiry=...)` when constructing the per-application `httpx.AsyncClient`.
+- Added configuration tests for the default, a decimal YAML override, and rejection of zero/negative values.
+- Added a scanner boundary test that captures the real `AsyncClient` constructor arguments and verifies both the existing timeout and the configured `httpx.Limits.keepalive_expiry`.
+- Documented the example setting and its idle-connection lifecycle semantics in both READMEs and the scan-start guide.
+- Completed self-review of the final diff; no scope, secret, or machine-specific-path concern was found. Controller task/final review remains pending by delegation.
 
 ## Remaining work
 
-- No objectkeys-contract work remains.
-- Address the five unrelated Windows portability/environment failures in a separate task before marking the repository fully green.
+- Controller: perform task and final review, then push the implementation commit if approved.
+- The five unrelated Windows portability/environment failures need a separate task before repository-wide status can be `completed`.
 
 ## Key files changed
 
+- `src/obs_scan_platform/config.py`
 - `src/obs_scan_platform/scanner.py`
+- `tests/test_config.py`
 - `tests/test_scanner.py`
-- `tests/test_scan_end_to_end.py`
-- `docs/superpowers/plans/2026-07-28-objectkeys-bucket-id.md`
+- `config/apps.example.yaml`
+- `README.md`
+- `README.zh-CN.md`
+- `docs/scan-start-guide.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
 ```powershell
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scanner.py::test_collect_prefix_stops_when_truncated_string_false -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scanner.py::test_scan_application_applies_configured_httpx_keepalive_expiry -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
 git diff --check
+git status --short --branch
+git diff --stat
+git diff
 ```
 
 ## Validation result
 
-- RED command: failed as intended with `assert None == 'bucket-id-1'` at `params.get("bucketId")`.
-- Fresh GREEN focused regression: `1 passed in 0.41s`.
-- Fresh relevant scanner and end-to-end suites: `96 passed in 1.66s`.
-- Fresh full suite: `215 passed, 5 failed, 1 warning in 4.50s`; failures are the documented Windows baseline.
-- `compileall` passed.
-- `git diff --check eccf3fe..84450c5` passed.
-- Final review found no Critical or Important issues; its only non-blocking stale-status Minor is corrected here.
+- Configuration RED: `4 failed, 21 passed`; the default/override failed because the field did not exist, and zero/negative values were silently ignored.
+- Configuration GREEN: `25 passed in 0.37s`.
+- Scanner RED: the boundary test failed with `KeyError: 'limits'` because `AsyncClient` received only `timeout`.
+- Scanner GREEN: `1 passed in 0.32s`.
+- Affected suites: `122 passed in 1.79s`.
+- Full suite: `219 passed, 5 failed, 1 warning in 4.28s`; the five failures match the documented Windows baseline (two symlink privilege failures, CSV CRLF normalization, backslash path semantics, and CLI path separator formatting).
+- `compileall` and `git diff --check` passed.
 
 ## Known risks
 
-- The external objectkeys API is validated at the outbound request boundary only; no live service run was performed.
-- Full-suite status remains blocked by two Windows symlink-privilege failures plus CRLF, backslash-path, and CLI path-separator portability failures.
+- The client construction contract is verified at the HTTPX boundary, but no live OBS service scan was run.
+- Full-suite Windows baseline failures remain outside this task's scope.
 
 ## Next recommended action
 
-Create a separate Windows portability task for the five baseline failures; that is the only remaining prerequisite for repository status `completed`.
+Controller should review the committed diff, preserve the documented baseline failures, and push `codex/obs-scan-platform` only after the review gates pass.

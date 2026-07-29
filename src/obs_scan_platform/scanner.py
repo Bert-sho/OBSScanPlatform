@@ -225,7 +225,12 @@ class Scanner:
                 "error": error,
                 "buckets": [],
             }
-        async with httpx.AsyncClient(timeout=self.config.scan.request_timeout_seconds) as http:
+        async with httpx.AsyncClient(
+            timeout=self.config.scan.request_timeout_seconds,
+            limits=httpx.Limits(
+                keepalive_expiry=self.config.scan.keepalive_expiry_seconds,
+            ),
+        ) as http:
             client = OBSClient(
                 http=http,
                 request_semaphore=self.request_semaphore,

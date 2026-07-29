@@ -114,7 +114,35 @@ applications:
     assert config.scan.global_request_concurrency == 150
     assert config.scan.objectkeys_concurrency_limit() == 30
     assert config.scan.max_retries == 3
+    assert config.scan.keepalive_expiry_seconds == 5.0
     assert config.scan.metadata_task_limit_per_bucket == 10000
+
+
+def test_load_config_sets_keepalive_expiry_seconds(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        """
+scan:
+  keepalive_expiry_seconds: 2.5
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_file)
+
+    assert config.scan.keepalive_expiry_seconds == 2.5
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_load_config_rejects_non_positive_keepalive_expiry_seconds(tmp_path: Path, value: int):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        f"scan:\n  keepalive_expiry_seconds: {value}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        load_config(config_file)
 
 
 def test_load_config_sets_metadata_task_limit_per_bucket(tmp_path: Path):

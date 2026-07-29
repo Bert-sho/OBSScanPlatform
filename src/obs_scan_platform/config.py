@@ -16,6 +16,7 @@ class ScanSettings(BaseModel):
     objectkeys_concurrency_per_bucket: int | None = None
     metadata_concurrency_per_bucket: int = 8
     request_timeout_seconds: int = 30
+    keepalive_expiry_seconds: float = Field(default=5.0, gt=0)
     max_retries: int = 3
     retry_base_delay_seconds: float = 2
     retry_max_delay_seconds: float = 60

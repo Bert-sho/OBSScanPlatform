@@ -1555,6 +1555,47 @@ async def test_scan_shared_bucket_treats_empty_objectkeys_success_false_as_empty
 
 
 @pytest.mark.asyncio
+async def test_scan_application_applies_configured_httpx_keepalive_expiry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scanner, application, _ = make_scanner()
+    scanner.config.scan.request_timeout_seconds = 47
+    scanner.config.scan.keepalive_expiry_seconds = 2.5
+    captured: dict[str, object] = {}
+
+    class CapturingAsyncClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        async def __aenter__(self) -> "CapturingAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    async def fake_list_buckets(application_config, client):
+        return []
+
+    monkeypatch.setattr("obs_scan_platform.scanner.httpx.AsyncClient", CapturingAsyncClient)
+    monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+
+    result = await scanner._scan_application(
+        application,
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+        bucket_semaphore=asyncio.Semaphore(1),
+    )
+
+    assert result["status"] == ScanStatus.SUCCESS.value
+    assert captured["timeout"] == 47
+    limits = captured["limits"]
+    assert isinstance(limits, httpx.Limits)
+    assert limits.keepalive_expiry == 2.5
+
+
+@pytest.mark.asyncio
 async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

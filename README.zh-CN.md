@@ -85,12 +85,15 @@ applications:
 | `objectkeys_concurrency_per_bucket` | `null` | 若设置则优先；否则使用旧别名；两者均缺失或为 `null` 时有效上限为 `30` |
 | `metadata_concurrency_per_bucket` | `8` | 单桶 metadata worker 并发 |
 | `request_timeout_seconds` | `30` | 请求超时秒数 |
+| `keepalive_expiry_seconds` | `5.0` | 使连接池中的空闲连接过期；必须为正数 |
 | `max_retries` | `3` | 首次请求失败后最多重试三次 |
 | `retry_base_delay_seconds` | `2` | 重试基础延迟秒数 |
 | `retry_max_delay_seconds` | `60` | 重试最大延迟秒数 |
 | `filelist_task_limit_per_bucket` | `100` | 单桶 filelist 目录任务递归阈值 |
 | `metadata_task_limit_per_bucket` | `10000` | 单桶累计 metadata 任务阈值 |
 | `aggregation_max_directories_in_memory` | `100000` | 单个聚合块的目录统计数量上限，必须为正数 |
+
+`keepalive_expiry_seconds` 控制连接池中空闲连接可复用的时长。默认值 `5.0` 秒会使空闲连接过期；它不会在五秒后终止活动请求，会继续启用连接复用，并与现有重试路径协同工作。
 
 `objectkeys_concurrency_per_bucket` 的模型原始默认值是 `null`，不是 `30`；`30` 是它和 `per_bucket_prefix_concurrency` 都没有值时的运行时有效回退值。新配置建议使用 `objectkeys_concurrency_per_bucket`。
 
