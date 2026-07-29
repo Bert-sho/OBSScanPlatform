@@ -2,14 +2,15 @@
 
 ## Timestamp
 
-`2026-07-29 10:10:09 +08:00` (Asia/Shanghai)
+`2026-07-29 10:19:28 +08:00` (Asia/Shanghai)
 
 ## Machine/environment
 
 - Workspace: `D:\code\OBSScanPlatform`
 - OS/shell: Windows PowerShell
 - Branch: `codex/obs-scan-platform`
-- Validation used the Git-ignored Python environment at `.superpowers\sdd\.venv`.
+- HTTPX under test: `0.28.1`
+- Validation environment: Git-ignored `.superpowers\sdd\.venv`
 
 ## Current branch
 
@@ -17,71 +18,126 @@
 
 ## Latest commit before this session
 
-- Task-brief historical before-session commit: `59a45d7`.
-- Task-brief design commit: `935ca97`.
-- Implementation starting HEAD: `7795ac468f71e56dbb60e1a0d882e478dabb94a4` (`docs: plan HTTPX keepalive expiry setting`).
+`59a45d7a4342839fedebbb3fcdccaffcb136d9a7`
+(`docs: record objectkeys fix push`)
 
-## Latest commit after this session
+## Latest commits after this session
 
-- `c550a2018185b003c25ce5f4c52d20afbe40c194` - `fix: configure HTTPX keepalive expiry` (local, unpushed initial implementation).
-- The current fix wave corrects its Important review finding and will create a second local conventional commit. Do not push in this subtask; the controller owns review gates and push.
+- `935ca97` — `docs: design HTTPX keepalive expiry setting`
+- `7795ac4` — `docs: plan HTTPX keepalive expiry setting`
+- `c550a2018185b003c25ce5f4c52d20afbe40c194` —
+  `fix: configure HTTPX keepalive expiry`
+- `89818f31e602dbf4a4bcec12e87e2abd459c0543` —
+  `fix: preserve HTTPX connection limits`
+- The final handoff commit is the commit containing this file; resolve its exact
+  hash with `git log -1 --oneline` after fetching the branch.
 
 ## Summary of what changed
 
-- Added positive YAML configuration field `scan.keepalive_expiry_seconds` with default `5.0`.
-- `Scanner._scan_application` now creates each shared per-application `httpx.AsyncClient` with the configured expiry and explicit `max_connections=100` / `max_keepalive_connections=20` caps while retaining `request_timeout_seconds` as the timeout.
-- The setting controls expiration of idle pooled connections only. It does not terminate active requests after five seconds, keeps reuse enabled, leaves HTTPX connection-count defaults intact, and coexists with the established retry path.
-- Added configuration/default/override/invalid-value tests and an `AsyncClient` construction-boundary test.
-- Updated the example YAML, English and Chinese README configuration documentation, and Chinese scan-start guide.
+- Added positive YAML setting `scan.keepalive_expiry_seconds`, default `5.0`.
+- The per-application shared `httpx.AsyncClient` receives:
+  - the existing request timeout;
+  - `httpx.Limits.keepalive_expiry` from YAML;
+  - explicit `max_connections=100`;
+  - explicit `max_keepalive_connections=20`.
+- Connection reuse and existing retry/error handling remain enabled.
+- Added configuration and scanner-boundary tests.
+- Updated example and operator documentation in English and Chinese.
+- Updated the approved design after review proved that a custom Limits object
+  with only `keepalive_expiry` would make connection caps unbounded.
 
 ## Important decisions and rationale
 
-- `Field(default=5.0, gt=0)` is the minimum Pydantic expression that provides the required default and accepts positive integers/decimals while rejecting zero and negatives.
-- HTTPX 0.28.1 creates an AsyncClient with effective `100` maximum connections and `20` maximum keep-alive connections, whereas `httpx.Limits(keepalive_expiry=...)` makes both values `None`. The fix wave supplies `100` and `20` explicitly to preserve behavior while customizing expiry.
-- The scanner test mocks only the external `AsyncClient` constructor and asserts the real `httpx.Limits` object, making it fail if the configured limit is absent or wrong.
+- `Field(default=5.0, gt=0)` accepts positive integers/decimals, provides
+  backward-compatible omission behavior, and rejects zero/negative values.
+- HTTPX 0.28.1's normal AsyncClient uses effective caps `100` and `20`.
+  Supplying only `keepalive_expiry` creates a Limits object whose caps are
+  `None`, so the fix supplies `100`/`20` explicitly.
+- Five seconds is an idle pool expiry, not an active-request deadline.
+  `scan.request_timeout_seconds` still controls request timeouts.
+- The observed `RemoteProtocolError` is consistent with peer disconnect/stale
+  reuse but does not prove the server timeout; this is a mitigation, while the
+  existing retry path remains the fallback.
 
 ## Failed attempts or rejected approaches
 
-- Configuration RED intentionally failed with two missing-field `AttributeError`s and two absent `ValidationError`s for zero/negative values before the model field existed.
-- Scanner RED intentionally failed with `KeyError: 'limits'` before the client construction supplied HTTPX limits.
-- The initial `httpx.Limits(keepalive_expiry=...)` approach was rejected after review because it changed the effective caps to unbounded. Changing the values away from HTTPX 0.28.1's `100`/`20`, disabling reuse, or adding `Connection: close` remains out of scope.
+- TDD configuration RED produced `4 failed, 21 passed` before the field existed.
+- TDD scanner RED produced `KeyError: 'limits'` before limits were supplied.
+- The initial implementation passed only `keepalive_expiry`; final review
+  correctly rejected it because its connection caps became `None`/unbounded.
+- Fix-wave RED produced `assert None == 100`, then passed after explicitly
+  restoring the `100`/`20` caps.
+- `Connection: close`, disabled pooling, retry changes, and server timeout
+  changes were deliberately rejected as outside the approved design.
+
+## Review status
+
+- Task review: initial runtime behavior had no Critical/Important finding.
+- Final whole-plan review: one Important connection-cap regression and one
+  Minor stale-handoff issue.
+- Fix commit `89818f3`: connection-cap finding addressed.
+- Scoped re-review: no new Critical/Important breakage; stale handoff wording
+  was the only remaining item and is corrected by this final record.
 
 ## Current test/build status
 
+Fresh completion verification:
+
 ```powershell
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scanner.py::test_scan_application_applies_configured_httpx_keepalive_expiry -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
+# 122 passed in 1.83s
+
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
-git diff --check
+# exit 0
+
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
+# 219 passed, 5 failed, 1 warning in 4.37s
 ```
 
-- Initial configuration GREEN: `25 passed in 0.37s`.
-- Fix-wave RED: `1 failed in 0.55s` with `assert None == 100` for `limits.max_connections`.
-- Fix-wave focused GREEN: `1 passed in 0.37s`.
-- Fix-wave affected suites: `122 passed in 1.95s`.
-- Fix-wave full suite: `219 passed, 5 failed, 1 warning in 4.24s`; failures are the known Windows symlink privilege, CRLF, backslash-path, and CLI separator baseline.
-- The fix-wave `compileall` and `git diff --check` results are recorded with the final local commit.
-- Self-review found no concerns. Controller task/final review is pending; no push was attempted.
+The five full-suite failures match the pre-session Windows baseline:
+
+- two tests require Windows symlink privilege;
+- one CSV response assertion differs only by CRLF normalization;
+- one backslash-path test follows Windows path semantics;
+- one CLI assertion expects a POSIX separator.
+
+No affected-suite regression was observed. Project policy keeps
+`docs/current-task.md` at `wip` because the full suite is not green.
+
+## Push status
+
+`git push -u origin HEAD` succeeded for `codex/obs-scan-platform` through
+`89818f3`:
+
+```text
+59a45d7..89818f3  HEAD -> codex/obs-scan-platform
+```
+
+The final documentation commit containing this handoff is pushed immediately
+after creation, followed by an explicit local/remote HEAD equality check.
 
 ## Uncommitted changes, if any
 
-Initial implementation is committed at `c550a20` and remains local/unpushed. The only new tracked changes are the reviewed connection-cap fix wave, its documentation corrections, and required handoff updates; no unrelated working-tree changes were present.
+At the time this record was prepared, only `docs/current-task.md` and
+`docs/handoff.md` contained the final push/review-state update. They are
+committed and pushed as the final completion action. Expected final working
+tree state: clean.
 
 ## Exact resume instructions for the next Codex session
 
 ```powershell
 cd D:\code\OBSScanPlatform
+git fetch origin
 git switch codex/obs-scan-platform
+git pull --ff-only
 git status --short --branch
-git diff --check
+git log -5 --oneline
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
-git diff --stat
-git diff
-git log -1 --oneline
 ```
 
-Review the keep-alive expiry diff against `docs/superpowers/plans/2026-07-29-httpx-keepalive-expiry.md`. Preserve the five documented Windows baseline failures, do not alter unrelated tests, and do not push until the controller's review gates approve the local commit.
+Confirm the branch is clean and local HEAD equals
+`origin/codex/obs-scan-platform`. For operational validation, run a
+representative OBS scan with `scan.keepalive_expiry_seconds: 5.0` and compare
+`RemoteProtocolError` retry frequency. Do not treat this setting as a request
+timeout or proof of the server's keep-alive value. Handle the five Windows
+baseline test failures only in a separate task.
