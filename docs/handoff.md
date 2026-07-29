@@ -31,6 +31,7 @@
 - `5fdc8ed` — `feat: generate configured bucket overview format`
 - `f32c08b` — `feat: download parquet overview parts`
 - `0a1107e` — `docs: document parquet bucket overviews`
+- `f2f0c0a` — `test: finalize parquet overview verification`
 - The final verification/handoff commits are the commits containing the last
   updates to this file; resolve their exact hashes with
   `git log -2 --oneline` after fetching the branch.
@@ -123,14 +124,22 @@ The requested feature suites are green. Project policy keeps
 
 ## Push status
 
-Pending final verification/handoff commit and `git push -u origin HEAD`.
+`git push -u origin HEAD` succeeded for `codex/parquet-overview` through
+`f2f0c0a`:
+
+```text
+* [new branch] HEAD -> codex/parquet-overview
+```
+
+The final documentation commit containing this push record is pushed
+immediately after creation, followed by an explicit local/remote HEAD equality
+check.
 
 ## Uncommitted changes, if any
 
-At the time this record was prepared, the final review documentation and exact
-mapping test assertion were uncommitted. They are committed before the first
-push. The push-result documentation is committed and pushed as a final follow-up
-action. Expected final working tree state: clean.
+At the time this push-result update was prepared, only `docs/current-task.md`
+and `docs/handoff.md` were uncommitted. They are committed and pushed as the
+final follow-up action. Expected final working tree state: clean.
 
 ## Exact resume instructions for the next Codex session
 

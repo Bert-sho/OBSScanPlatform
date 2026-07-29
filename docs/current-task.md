@@ -54,6 +54,8 @@ downloads.
 - Updated example YAML, English/Chinese README files, operator guide, package
   description, architecture notes, approved design, and implementation plan.
 - Completed local whole-change review; no Critical or Important issue remains.
+- Pushed `codex/parquet-overview` to GitHub through `f2f0c0a`; the final
+  push-status record is committed and pushed as the last delivery action.
 
 ## Remaining work
 
