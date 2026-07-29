@@ -514,8 +514,34 @@ def test_overview_settings_default_to_parquet_depth_four_and_default_type_map():
 
     assert config.scan.overview_format == "parquet"
     assert config.scan.max_depth == 4
-    assert config.scan.file_type_map["jpg"] == "图片"
-    assert config.scan.file_type_map["tar"] == "压缩包"
+    assert config.scan.file_type_map == {
+        "jpg": "图片",
+        "jpeg": "图片",
+        "png": "图片",
+        "gif": "图片",
+        "cr3": "RAW",
+        "nef": "RAW",
+        "braw": "RAW",
+        "mp4": "视频",
+        "mov": "视频",
+        "avi": "视频",
+        "py": "脚本",
+        "sh": "脚本",
+        "js": "脚本",
+        "ts": "脚本",
+        "onnx": "模型",
+        "ckpt": "模型",
+        "safetensors": "模型",
+        "pt": "模型",
+        "parquet": "Parquet",
+        "json": "配置文件",
+        "yaml": "配置文件",
+        "yml": "配置文件",
+        "md": "文档",
+        "pdf": "文档",
+        "zip": "压缩包",
+        "tar": "压缩包",
+    }
 
 
 def test_file_type_map_merges_normalized_yaml_overrides(tmp_path: Path):

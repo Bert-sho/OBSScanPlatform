@@ -2,115 +2,123 @@
 
 ## Current task title
 
-Configure and verify HTTPX keep-alive expiry
+Add configurable Parquet bucket overview output
 
 ## Current branch
 
-`codex/obs-scan-platform`
+`codex/parquet-overview`
 
 ## Task status
 
 `wip`
 
-The requested implementation, reviews, and initial push are complete. Project
+The requested implementation and focused validation are complete. Repository
 policy prevents marking the task `completed` because the full Windows suite
-still has five pre-existing environment/portability failures; all 122 tests in
-the affected configuration, scanner, and end-to-end suites pass.
+still has five pre-existing environment/portability failures; the feature
+suite has 193 passing tests and the Parquet API checks have 7 passing tests
+with one Windows symlink test skipped.
 
 ## User goal
 
-Expose a positive `scan.keepalive_expiry_seconds` YAML setting, default it to
-`5.0`, and apply it to each per-application HTTPX client's idle
-connection-pool expiry without changing timeout, retry, concurrency,
-connection reuse, or effective connection-count behavior.
+Add a global YAML setting that selects mutually exclusive CSV or Parquet
+bucket overviews, defaulting to Parquet. Preserve the existing CSV behavior.
+Write Snappy Parquet parts with at most 50,000 rows, the required ten-field
+non-null schema, one-directory object attribution, configurable cutoff depth
+(default 4), configurable extension categories, and manifest-authorized part
+downloads.
 
 ## Completed work
 
-- Added `ScanSettings.keepalive_expiry_seconds: float = Field(default=5.0, gt=0)`.
-- Applied the configured value through `httpx.Limits.keepalive_expiry`.
-- Explicitly retained HTTPX 0.28.1's effective client caps:
-  `max_connections=100` and `max_keepalive_connections=20`.
-- Preserved `request_timeout_seconds`, retry policy, concurrency controls, and
-  connection reuse; no `Connection: close` header was added.
-- Added TDD coverage for the default, decimal YAML override, rejection of zero
-  and negative values, timeout preservation, keep-alive expiry, and both
-  connection caps.
-- Updated example YAML, English/Chinese READMEs, scan-start guide, design, and
-  implementation plan.
-- Task review found no Critical/Important issue in the initial runtime change.
-- Final review found the custom-Limits connection-cap regression; commit
-  `89818f31e602dbf4a4bcec12e87e2abd459c0543` fixed it.
-- Scoped re-review confirmed the connection-cap finding was addressed with no
-  new Critical/Important breakage. This final record corrects the remaining
-  handoff-state wording.
-- `git push -u origin HEAD` successfully pushed the branch through
-  `89818f3`; the final documentation commit is pushed as the last completion
-  action.
+- Added global `scan.overview_format`, `scan.max_depth`, and
+  `scan.file_type_map` settings. Parquet and depth 4 are the defaults; YAML
+  type-map entries merge over the exact built-in mapping.
+- Preserved the legacy CSV aggregation path unchanged when
+  `overview_format: csv` is selected.
+- Added a bounded external Parquet aggregator that:
+  - assigns each object to exactly one path;
+  - truncates deeper objects into the configured cutoff directory;
+  - calculates count, byte totals, maximum size, latest UTC date, current path
+    depth, and sorted JSON file categories;
+  - uses the UTC scan-start date when every contributing timestamp is absent
+    or invalid;
+  - writes Snappy parts of at most 50,000 rows;
+  - writes one typed zero-row part for an empty bucket;
+  - stages and atomically publishes each bucket output directory.
+- Added manifest fields `overview_format`, `overview_path`, and
+  `overview_files`; retained `csv_path` only for CSV compatibility.
+- Added a manifest-authorized Parquet part download API with traversal and
+  symlink protections.
+- Added TDD coverage for configuration, aggregation semantics, exact schema,
+  compression, splitting, empty buckets, publication failure, scanner
+  dispatch, manifests, and downloads.
+- Updated example YAML, English/Chinese README files, operator guide, package
+  description, architecture notes, approved design, and implementation plan.
+- Completed local whole-change review; no Critical or Important issue remains.
 
 ## Remaining work
 
-- No implementation or review work remains for the requested keep-alive change.
-- The five unrelated Windows full-suite failures require a separate portability
-  task if repository-wide validation must become green.
-- A live OBS scan remains the recommended operational confirmation.
+- No implementation work remains for the requested feature.
+- The five unrelated Windows full-suite failures require a separate
+  portability task if repository-wide validation must become green.
+- A representative live OBS scan remains the recommended operational check.
 
 ## Key files changed
 
 - `src/obs_scan_platform/config.py`
+- `src/obs_scan_platform/models.py`
+- `src/obs_scan_platform/parquet_aggregation.py`
 - `src/obs_scan_platform/scanner.py`
+- `src/obs_scan_platform/api.py`
 - `tests/test_config.py`
+- `tests/test_parquet_aggregation.py`
 - `tests/test_scanner.py`
+- `tests/test_api.py`
+- `tests/test_scan_end_to_end.py`
+- `pyproject.toml`
 - `config/apps.example.yaml`
 - `README.md`
 - `README.zh-CN.md`
+- `CLAUDE.md`
 - `docs/scan-start-guide.md`
+- `docs/superpowers/specs/2026-07-29-parquet-overview-design.md`
+- `docs/superpowers/plans/2026-07-29-parquet-overview.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
-- `docs/superpowers/specs/2026-07-29-httpx-keepalive-expiry-design.md`
-- `docs/superpowers/plans/2026-07-29-httpx-keepalive-expiry.md`
 
 ## Validation commands run
 
 ```powershell
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scanner.py::test_scan_application_applies_configured_httpx_keepalive_expiry -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_parquet_aggregation.py tests/test_aggregation.py tests/test_external_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_api.py -k parquet -q
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
 git diff --check
-git status --short --branch
-git diff --stat
-git diff
 ```
 
 ## Validation result
 
-- Configuration RED: `4 failed, 21 passed`; the field did not yet exist and
-  non-positive extra values were ignored.
-- Configuration GREEN: `25 passed`.
-- Initial scanner RED: `KeyError: 'limits'`.
-- Initial scanner GREEN: `1 passed`.
-- Fix-wave RED: `assert None == 100` exposed the accidental unbounded
-  connection cap.
-- Fix-wave GREEN: focused scanner test `1 passed`.
-- Fresh affected-suite verification: `122 passed in 1.83s`.
-- Fresh compilation: `python -m compileall -q src tests` exited `0`.
-- Fresh full suite: `219 passed, 5 failed, 1 warning in 4.37s`; failures are
-  the unchanged Windows baseline (two symlink privilege failures, CSV CRLF
-  normalization, backslash-path semantics, and CLI path-separator formatting).
-- Diff checks and changed-line secret-pattern scan passed.
+- Fresh feature suite: `193 passed in 5.02s`.
+- Fresh Parquet API suite: `7 passed, 1 skipped, 19 deselected in 1.03s`;
+  the skip is the expected Windows symlink privilege case.
+- Fresh compilation: exited `0`.
+- Fresh full suite: `256 passed, 5 failed, 1 skipped, 1 warning in 6.46s`.
+  The five failures exactly match the pre-task Windows baseline: two symlink
+  privilege failures, CSV CRLF response normalization, backslash path
+  semantics, and CLI path-separator formatting.
+- `git diff --check` reported no whitespace errors.
 
 ## Known risks
 
-- The explicit `100`/`20` caps match installed HTTPX `0.28.1`; revalidate
-  them when upgrading HTTPX.
-- The boundary contract is covered by automated tests, but no live OBS service
-  scan was available.
-- A five-second client expiry reduces stale idle-connection reuse; it cannot
-  guarantee that every server or network disconnect is prevented.
+- No live OBS service scan was available; the end-to-end behavior is covered
+  with simulated service responses.
+- PyArrow is a new runtime dependency and increases installation size.
+- A bucket can contain more than 50,000 aggregate paths, so consumers must use
+  the ordered `overview_files` list instead of assuming a single part.
+- The five existing Windows portability failures remain outside this task.
 
 ## Next recommended action
 
-Use the default or set `scan.keepalive_expiry_seconds: 5.0` explicitly, run a
-representative OBS scan, and monitor whether `RemoteProtocolError` retries
-decrease. Treat the existing five Windows test failures as a separate task.
+Deploy or install the updated dependency set, run a representative scan with
+the default Parquet configuration, inspect `manifest.json`, and download/read
+all listed parts. Address the existing Windows test failures in a separate
+task.

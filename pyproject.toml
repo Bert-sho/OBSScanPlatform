@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "obs-scan-platform"
 version = "0.1.0"
-description = "Controlled OBS bucket scanner with directory CSV aggregation"
+description = "Controlled OBS bucket scanner with configurable CSV or Parquet overviews"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.111",
