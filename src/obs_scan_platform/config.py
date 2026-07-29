@@ -1,14 +1,47 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+DEFAULT_FILE_TYPE_MAP = {
+    "jpg": "图片",
+    "jpeg": "图片",
+    "png": "图片",
+    "gif": "图片",
+    "cr3": "RAW",
+    "nef": "RAW",
+    "braw": "RAW",
+    "mp4": "视频",
+    "mov": "视频",
+    "avi": "视频",
+    "py": "脚本",
+    "sh": "脚本",
+    "js": "脚本",
+    "ts": "脚本",
+    "onnx": "模型",
+    "ckpt": "模型",
+    "safetensors": "模型",
+    "pt": "模型",
+    "parquet": "Parquet",
+    "json": "配置文件",
+    "yaml": "配置文件",
+    "yml": "配置文件",
+    "md": "文档",
+    "pdf": "文档",
+    "zip": "压缩包",
+    "tar": "压缩包",
+}
 
 
 class ScanSettings(BaseModel):
     results_dir: str = "results"
     temp_subdir: str = "_tmp"
     keep_temp_files: bool = False
+    overview_format: Literal["csv", "parquet"] = "parquet"
+    max_depth: int = Field(default=4, ge=0)
+    file_type_map: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_FILE_TYPE_MAP))
     page_size: int = 1000
     bucket_concurrency: int = 4
     global_request_concurrency: int = 150
@@ -23,6 +56,20 @@ class ScanSettings(BaseModel):
     filelist_task_limit_per_bucket: int = 100
     metadata_task_limit_per_bucket: int = 10000
     aggregation_max_directories_in_memory: int = Field(default=100000, ge=1)
+
+    @field_validator("file_type_map", mode="before")
+    @classmethod
+    def merge_file_type_map(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        merged = dict(DEFAULT_FILE_TYPE_MAP)
+        for raw_extension, raw_category in value.items():
+            extension = str(raw_extension).strip().lower().removeprefix(".")
+            category = raw_category.strip() if isinstance(raw_category, str) else ""
+            if not extension or not category:
+                raise ValueError("file_type_map keys and values must be non-empty")
+            merged[extension] = category
+        return merged
 
     def objectkeys_concurrency_limit(self) -> int:
         if self.objectkeys_concurrency_per_bucket is not None:

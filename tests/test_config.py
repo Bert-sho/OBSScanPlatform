@@ -507,3 +507,46 @@ applications:
 
     with pytest.raises(ValidationError):
         load_config(config_file)
+
+
+def test_overview_settings_default_to_parquet_depth_four_and_default_type_map():
+    config = AppConfigFile()
+
+    assert config.scan.overview_format == "parquet"
+    assert config.scan.max_depth == 4
+    assert config.scan.file_type_map["jpg"] == "图片"
+    assert config.scan.file_type_map["tar"] == "压缩包"
+
+
+def test_file_type_map_merges_normalized_yaml_overrides(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text(
+        "scan:\n  overview_format: csv\n  max_depth: 0\n"
+        "  file_type_map:\n    .JPG: 自定义图片\n    TXT: 文档\n",
+        encoding="utf-8",
+    )
+
+    scan = load_config(config_file).scan
+
+    assert scan.overview_format == "csv"
+    assert scan.max_depth == 0
+    assert scan.file_type_map["jpg"] == "自定义图片"
+    assert scan.file_type_map["txt"] == "文档"
+    assert scan.file_type_map["png"] == "图片"
+
+
+@pytest.mark.parametrize("value", ["avro", "PARQUET", ""])
+def test_overview_format_rejects_unsupported_values(value: str):
+    with pytest.raises(ValidationError):
+        AppConfigFile(scan={"overview_format": value})
+
+
+def test_max_depth_rejects_negative_value():
+    with pytest.raises(ValidationError):
+        AppConfigFile(scan={"max_depth": -1})
+
+
+@pytest.mark.parametrize("mapping", [{"": "图片"}, {"jpg": ""}, {".": "图片"}])
+def test_file_type_map_rejects_empty_normalized_keys_or_values(mapping: dict[str, str]):
+    with pytest.raises(ValidationError):
+        AppConfigFile(scan={"file_type_map": mapping})
