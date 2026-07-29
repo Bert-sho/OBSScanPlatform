@@ -28,6 +28,8 @@ aggregations before request admission resumes.
 - Task 1 created `ScanPhaseCoordinator` in commit `7ba14f8`.
 - Task 2 scoped every OBS HTTP attempt with that coordinator in commit
   `783a111`.
+- Task 3 implemented the shared aggregation writer scope and delivery tests in
+  commit `e43dadd` (`feat: serialize aggregation with request draining`).
 - Task 3 wraps the complete scanner CSV/Parquet dispatch in
   `self.phase_coordinator.aggregation()` without changing the aggregator
   argument lists or phase-boundary placement.
@@ -93,5 +95,6 @@ git diff --check
 
 ## Next recommended action
 
-Review the task commit and report, run the parent’s final whole-branch checks,
-then push `codex/parquet-overview` if the review finds no issue.
+The controller should perform final whole-branch review and verification, then
+push `codex/parquet-overview` if no issue remains. No Task 3 implementation
+files are pending a commit.

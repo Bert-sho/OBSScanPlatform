@@ -25,8 +25,11 @@
 - `76b810b` — `docs: plan global aggregation request barrier`
 - `7ba14f8` — `feat: coordinate scan request and aggregation phases`
 - `783a111` — `feat: pause OBS attempts for aggregation`
-- The Task 3 delivery commit follows this handoff update; obtain its exact
-  hash with `git log -1 --oneline` before controller review.
+- `e43dadd` — `feat: serialize aggregation with request draining` (Task 3
+  implementation)
+- This handoff-correction commit is the local HEAD atop `e43dadd`; its hash is
+  intentionally not self-recorded. After it is created, the tracked working
+  tree is clean and the branch is ahead of `origin/codex/parquet-overview`.
 
 ## Summary of what changed
 
@@ -91,8 +94,9 @@ Not pushed by this task; the controller performs final review and push.
 
 ## Uncommitted changes, if any
 
-The Task 3 code, tests, documentation, and report are to be committed before
-controller review. Check the exact state with `git status --short --branch`.
+None after this handoff-correction commit. The tracked working tree is clean;
+the local branch is ahead of `origin/codex/parquet-overview` and remains
+unpushed for controller review.
 
 ## Exact resume instructions for the next Codex session
 
@@ -107,5 +111,5 @@ git diff --check
 ```
 
 If the full suite still reports exactly the five documented Windows baseline
-failures, review the Task 3 report, commit any pending tracked files, and let
-the controller perform the final push.
+failures, let the controller perform final review, verification, and push. Do
+not create another Task 3 implementation commit.
