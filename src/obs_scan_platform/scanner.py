@@ -29,6 +29,7 @@ from obs_scan_platform.models import (
 from obs_scan_platform.obs_client import OBSClient, OBSRequestError, encode_object_key, encode_request_body
 from obs_scan_platform.parquet_aggregation import aggregate_bucket_parquet
 from obs_scan_platform.paths import prefix_temp_filename
+from obs_scan_platform.scan_coordination import ScanPhaseCoordinator
 
 
 LOGGER = logging.getLogger(__name__)
@@ -156,7 +157,7 @@ class Scanner:
     def __init__(self, config: AppConfigFile, *, show_progress: bool = False) -> None:
         self.config = config
         self.show_progress = show_progress
-        self.request_semaphore = asyncio.Semaphore(config.scan.global_request_concurrency)
+        self.phase_coordinator = ScanPhaseCoordinator(config.scan.global_request_concurrency)
 
     async def run(self, run_id: str | None = None, appid: str | None = None) -> dict[str, Any]:
         run_id = run_id or _default_run_id()
@@ -236,7 +237,7 @@ class Scanner:
         ) as http:
             client = OBSClient(
                 http=http,
-                request_semaphore=self.request_semaphore,
+                phase_coordinator=self.phase_coordinator,
                 max_retries=self.config.scan.max_retries,
                 retry_base_delay_seconds=self.config.scan.retry_base_delay_seconds,
                 retry_max_delay_seconds=self.config.scan.retry_max_delay_seconds,

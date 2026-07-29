@@ -18,6 +18,7 @@ from obs_scan_platform.logging_config import configure_logging
 from obs_scan_platform.models import BucketInfo, BucketScanResult, PartialErrorSummary, ScanStatus
 from obs_scan_platform.obs_client import OBSClient, OBSRequestError
 from obs_scan_platform.paths import prefix_temp_filename
+from obs_scan_platform.scan_coordination import ScanPhaseCoordinator
 from obs_scan_platform.scanner import (
     Scanner,
     _rollup_status,
@@ -1538,7 +1539,7 @@ async def test_scan_shared_bucket_treats_empty_objectkeys_success_false_as_empty
 
     client = OBSClient(
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-        request_semaphore=asyncio.Semaphore(10),
+        phase_coordinator=ScanPhaseCoordinator(10),
         max_retries=0,
         retry_base_delay_seconds=0,
         retry_max_delay_seconds=0,

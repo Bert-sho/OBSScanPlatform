@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 
+from obs_scan_platform.scan_coordination import ScanPhaseCoordinator
+
 LOGGER = logging.getLogger(__name__)
 MAX_RESPONSE_BODY_CHARS = 2048
 
@@ -130,13 +132,13 @@ class OBSClient:
         self,
         *,
         http: httpx.AsyncClient,
-        request_semaphore: asyncio.Semaphore,
+        phase_coordinator: ScanPhaseCoordinator,
         max_retries: int,
         retry_base_delay_seconds: float,
         retry_max_delay_seconds: float,
     ) -> None:
         self.http = http
-        self.request_semaphore = request_semaphore
+        self.phase_coordinator = phase_coordinator
         self.max_retries = max_retries
         self.retry_base_delay_seconds = retry_base_delay_seconds
         self.retry_max_delay_seconds = retry_max_delay_seconds
@@ -153,55 +155,55 @@ class OBSClient:
         for attempt_number in range(1, max_attempts + 1):
             request = self.http.build_request("GET", url, params=params, headers=headers)
             try:
-                async with self.request_semaphore:
+                async with self.phase_coordinator.request_attempt():
                     response = await self.http.send(request)
-                if response.status_code >= 400:
-                    body, truncated, original_chars = _bounded_body(response.text)
-                    raise OBSRequestError(
-                        endpoint=endpoint,
-                        status_code=response.status_code,
-                        reason=_response_reason(response),
-                        url=str(request.url),
-                        response_body=body,
-                        response_body_truncated=truncated,
-                        response_body_original_chars=original_chars,
-                        exception_type="HTTPStatusError",
-                        attempts=attempt_number,
-                    )
-                try:
-                    data = response.json()
-                except ValueError as exc:
-                    body, truncated, original_chars = _bounded_body(response.text)
-                    raise OBSRequestError(
-                        endpoint=endpoint,
-                        status_code=response.status_code,
-                        reason=f"Invalid JSON: {exc}",
-                        url=str(request.url),
-                        response_body=body,
-                        response_body_truncated=truncated,
-                        response_body_original_chars=original_chars,
-                        exception_type="InvalidJSON",
-                        attempts=attempt_number,
-                    ) from exc
-                success = data.get("success")
-                if success is False or (isinstance(success, str) and success.lower() == "false"):
-                    if not _has_failure_reason(data) and endpoint == "filelist" and _has_empty_filelist_objects(data):
-                        return data
-                    if not _has_failure_reason(data) and endpoint == "objectkeys" and _has_empty_objectkeys(data):
-                        return data
-                    body, truncated, original_chars = _bounded_body(response.text)
-                    raise OBSRequestError(
-                        endpoint=endpoint,
-                        status_code=response.status_code,
-                        reason=_json_failure_reason(data),
-                        url=str(request.url),
-                        response_body=body,
-                        response_body_truncated=truncated,
-                        response_body_original_chars=original_chars,
-                        exception_type="OBSBusinessError",
-                        attempts=attempt_number,
-                    )
-                return data
+                    if response.status_code >= 400:
+                        body, truncated, original_chars = _bounded_body(response.text)
+                        raise OBSRequestError(
+                            endpoint=endpoint,
+                            status_code=response.status_code,
+                            reason=_response_reason(response),
+                            url=str(request.url),
+                            response_body=body,
+                            response_body_truncated=truncated,
+                            response_body_original_chars=original_chars,
+                            exception_type="HTTPStatusError",
+                            attempts=attempt_number,
+                        )
+                    try:
+                        data = response.json()
+                    except ValueError as exc:
+                        body, truncated, original_chars = _bounded_body(response.text)
+                        raise OBSRequestError(
+                            endpoint=endpoint,
+                            status_code=response.status_code,
+                            reason=f"Invalid JSON: {exc}",
+                            url=str(request.url),
+                            response_body=body,
+                            response_body_truncated=truncated,
+                            response_body_original_chars=original_chars,
+                            exception_type="InvalidJSON",
+                            attempts=attempt_number,
+                        ) from exc
+                    success = data.get("success")
+                    if success is False or (isinstance(success, str) and success.lower() == "false"):
+                        if not _has_failure_reason(data) and endpoint == "filelist" and _has_empty_filelist_objects(data):
+                            return data
+                        if not _has_failure_reason(data) and endpoint == "objectkeys" and _has_empty_objectkeys(data):
+                            return data
+                        body, truncated, original_chars = _bounded_body(response.text)
+                        raise OBSRequestError(
+                            endpoint=endpoint,
+                            status_code=response.status_code,
+                            reason=_json_failure_reason(data),
+                            url=str(request.url),
+                            response_body=body,
+                            response_body_truncated=truncated,
+                            response_body_original_chars=original_chars,
+                            exception_type="OBSBusinessError",
+                            attempts=attempt_number,
+                        )
+                    return data
             except OBSRequestError as error:
                 _log_failed_attempt(error, max_attempts)
                 if not _is_retryable(error) or attempt_number == max_attempts:

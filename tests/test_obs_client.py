@@ -2,21 +2,104 @@ import asyncio
 import base64
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
 
 from obs_scan_platform.obs_client import OBSClient, OBSRequestError, encode_object_key, encode_request_body
+from obs_scan_platform.scan_coordination import ScanPhaseCoordinator
 
 
-def make_client(handler, *, max_retries: int = 3) -> OBSClient:
+def make_client(
+    handler,
+    *,
+    max_retries: int = 3,
+    retry_base_delay_seconds: float = 0,
+    phase_coordinator: ScanPhaseCoordinator | None = None,
+) -> OBSClient:
     return OBSClient(
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://obs.example"),
-        request_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=phase_coordinator or ScanPhaseCoordinator(1),
         max_retries=max_retries,
-        retry_base_delay_seconds=0,
-        retry_max_delay_seconds=0,
+        retry_base_delay_seconds=retry_base_delay_seconds,
+        retry_max_delay_seconds=retry_base_delay_seconds,
     )
+
+
+class RecordingCoordinator(ScanPhaseCoordinator):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__(1)
+        self.events = events
+
+    @asynccontextmanager
+    async def request_attempt(self) -> AsyncIterator[None]:
+        self.events.append("scope-enter")
+        async with super().request_attempt():
+            yield
+        self.events.append("scope-exit")
+
+
+@pytest.mark.asyncio
+async def test_get_json_parses_response_inside_request_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    events: list[str] = []
+    original_json = httpx.Response.json
+
+    def recording_json(response: httpx.Response, **kwargs):
+        events.append("json")
+        return original_json(response, **kwargs)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        events.append("send")
+        return httpx.Response(200, json={"value": 1}, request=request)
+
+    monkeypatch.setattr(httpx.Response, "json", recording_json)
+    client = make_client(handler, phase_coordinator=RecordingCoordinator(events))
+    try:
+        assert await client.get_json("/test", params={}) == {"value": 1}
+    finally:
+        await client.close()
+
+    assert events == ["scope-enter", "send", "json", "scope-exit"]
+
+
+@pytest.mark.asyncio
+async def test_get_json_retry_waits_for_aggregation():
+    coordinator = ScanPhaseCoordinator(1)
+    first_attempt_seen = asyncio.Event()
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            first_attempt_seen.set()
+            return httpx.Response(503, json={"success": False, "msg": "busy"})
+        return httpx.Response(200, json={"success": True, "value": 1})
+
+    client = make_client(
+        handler,
+        max_retries=1,
+        retry_base_delay_seconds=0.05,
+        phase_coordinator=coordinator,
+    )
+    request_task = asyncio.create_task(client.get_json("/test", params={}))
+    try:
+        await first_attempt_seen.wait()
+        await asyncio.sleep(0)
+        async with coordinator.aggregation():
+            await asyncio.sleep(0.06)
+            assert calls == 1
+
+        data = await request_task
+    finally:
+        await client.close()
+
+    assert data["value"] == 1
+    assert calls == 2
 
 
 def test_encode_request_body_roundtrips_payload():
@@ -148,7 +231,7 @@ async def test_get_json_retries_503_then_succeeds():
 
     client = OBSClient(
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
-        request_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=ScanPhaseCoordinator(1),
         max_retries=2,
         retry_base_delay_seconds=0,
         retry_max_delay_seconds=0,
@@ -174,7 +257,7 @@ async def test_get_json_raises_after_retries():
 
     client = OBSClient(
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
-        request_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=ScanPhaseCoordinator(1),
         max_retries=1,
         retry_base_delay_seconds=0,
         retry_max_delay_seconds=0,
@@ -200,7 +283,7 @@ async def test_get_json_does_not_retry_404():
 
     client = OBSClient(
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
-        request_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=ScanPhaseCoordinator(1),
         max_retries=3,
         retry_base_delay_seconds=0,
         retry_max_delay_seconds=0,
@@ -222,7 +305,7 @@ async def test_get_json_returns_plain_json_without_success_field():
 
     client = OBSClient(
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
-        request_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=ScanPhaseCoordinator(1),
         max_retries=1,
         retry_base_delay_seconds=0,
         retry_max_delay_seconds=0,
@@ -249,7 +332,7 @@ async def test_get_json_retries_success_false_then_succeeds():
 
     client = OBSClient(
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
-        request_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=ScanPhaseCoordinator(1),
         max_retries=1,
         retry_base_delay_seconds=0,
         retry_max_delay_seconds=0,
@@ -275,7 +358,7 @@ async def test_get_json_returns_empty_filelist_objects_even_when_success_false()
 
     client = OBSClient(
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
-        request_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=ScanPhaseCoordinator(1),
         max_retries=3,
         retry_base_delay_seconds=0,
         retry_max_delay_seconds=0,
@@ -308,7 +391,7 @@ async def test_get_json_returns_empty_objectkeys_even_when_success_false():
 
     client = OBSClient(
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
-        request_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=ScanPhaseCoordinator(1),
         max_retries=3,
         retry_base_delay_seconds=0,
         retry_max_delay_seconds=0,
@@ -340,7 +423,7 @@ async def test_get_json_empty_objectkeys_still_raises_when_result_has_error_reas
 
     client = OBSClient(
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://obs.example"),
-        request_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=ScanPhaseCoordinator(1),
         max_retries=0,
         retry_base_delay_seconds=0,
         retry_max_delay_seconds=0,
