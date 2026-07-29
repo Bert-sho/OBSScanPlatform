@@ -4,7 +4,7 @@
 
 **Goal:** Add a positive YAML-configurable HTTPX idle keep-alive expiry and apply its `5.0`-second default to every per-application scan client.
 
-**Architecture:** `ScanSettings` remains the source of truth for the value. `Scanner._scan_application` converts the setting into a real `httpx.Limits` object when it constructs the shared per-application `AsyncClient`; existing timeout, retry, concurrency, and connection-count behavior stays unchanged.
+**Architecture:** `ScanSettings` remains the source of truth for the value. `Scanner._scan_application` converts the setting into a real `httpx.Limits` object when it constructs the shared per-application `AsyncClient`, explicitly retaining HTTPX 0.28.1's effective `100` maximum-connection and `20` maximum-keep-alive-connection caps; existing timeout, retry, and concurrency behavior stays unchanged.
 
 **Tech Stack:** Python 3.11+, Pydantic, PyYAML, HTTPX, pytest, pytest-asyncio, Git
 
@@ -13,7 +13,7 @@
 - Name the YAML field `scan.keepalive_expiry_seconds`.
 - Use `5.0` seconds when the YAML field is omitted.
 - Accept only values greater than zero; integers and decimals are valid.
-- Configure only `httpx.Limits.keepalive_expiry`; retain HTTPX defaults for connection counts.
+- Configure `httpx.Limits.keepalive_expiry` and explicitly retain HTTPX 0.28.1's effective `max_connections=100` and `max_keepalive_connections=20` defaults.
 - Keep connection reuse enabled and do not send `Connection: close`.
 - Preserve `scan.request_timeout_seconds`, retries, retry delays, and concurrency behavior.
 - Update `docs/current-task.md` and `docs/handoff.md` before the implementation commit.
@@ -154,6 +154,8 @@ async def test_scan_application_applies_configured_httpx_keepalive_expiry(
     assert captured["timeout"] == 47
     limits = captured["limits"]
     assert isinstance(limits, httpx.Limits)
+    assert limits.max_connections == 100
+    assert limits.max_keepalive_connections == 20
     assert limits.keepalive_expiry == 2.5
 ```
 
@@ -175,6 +177,8 @@ Construct the per-application client as follows:
 async with httpx.AsyncClient(
     timeout=self.config.scan.request_timeout_seconds,
     limits=httpx.Limits(
+        max_connections=100,
+        max_keepalive_connections=20,
         keepalive_expiry=self.config.scan.keepalive_expiry_seconds,
     ),
 ) as http:

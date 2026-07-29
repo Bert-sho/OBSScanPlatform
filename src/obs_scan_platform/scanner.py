@@ -228,6 +228,8 @@ class Scanner:
         async with httpx.AsyncClient(
             timeout=self.config.scan.request_timeout_seconds,
             limits=httpx.Limits(
+                max_connections=100,
+                max_keepalive_connections=20,
                 keepalive_expiry=self.config.scan.keepalive_expiry_seconds,
             ),
         ) as http:

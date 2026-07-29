@@ -28,7 +28,7 @@ expiry. HTTPX therefore uses its library default.
 
 - Sending `Connection: close` or disabling connection reuse.
 - Discovering or changing the server's keep-alive timeout.
-- Changing HTTPX maximum connection or maximum keep-alive connection counts.
+- Changing HTTPX's effective maximum connection or maximum keep-alive connection counts; the current AsyncClient defaults are supplied explicitly when customizing expiry.
 - Changing request timeouts, retry counts, retry delays, or OBS error handling.
 - Guaranteeing that `RemoteProtocolError` cannot occur for other network or
   server-side causes.
@@ -60,13 +60,17 @@ an `httpx.Limits` value using the loaded setting:
 
 ```python
 limits = httpx.Limits(
+    max_connections=100,
+    max_keepalive_connections=20,
     keepalive_expiry=self.config.scan.keepalive_expiry_seconds,
 )
 ```
 
 The limits object is passed to `httpx.AsyncClient` together with the existing
-request timeout. No maximum connection arguments are supplied, so HTTPX keeps
-its existing defaults for those limits.
+request timeout. HTTPX 0.28.1's effective AsyncClient defaults of `100` maximum
+connections and `20` maximum keep-alive connections are supplied explicitly,
+because constructing `httpx.Limits` with only an expiry would otherwise make
+both limits unbounded.
 
 HTTPX may reuse an idle pooled connection for up to the configured expiry.
 After the connection has been idle longer than that value, it is discarded
@@ -90,7 +94,8 @@ Tests will be written before production changes and will cover:
 - YAML overriding the value with a positive decimal;
 - YAML rejecting zero and negative values;
 - scanner client construction passing the configured value through
-  `httpx.Limits.keepalive_expiry` while preserving the request timeout;
+  `httpx.Limits.keepalive_expiry` while preserving the request timeout and the
+  effective `100`/`20` connection caps;
 - the existing configuration, scanner, and end-to-end tests remaining green.
 
 The client-construction test will replace only the external HTTP client

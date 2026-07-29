@@ -1592,6 +1592,8 @@ async def test_scan_application_applies_configured_httpx_keepalive_expiry(
     assert captured["timeout"] == 47
     limits = captured["limits"]
     assert isinstance(limits, httpx.Limits)
+    assert limits.max_connections == 100
+    assert limits.max_keepalive_connections == 20
     assert limits.keepalive_expiry == 2.5
 
 
