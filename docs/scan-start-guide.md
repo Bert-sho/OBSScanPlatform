@@ -69,7 +69,7 @@ applications:
         enable: false
 ```
 
-跳过的桶不会调用桶 endpoint、filelist、metadata 或 objectkeys，不生成 CSV，也不出现在桶级 manifest 条目中。配置中存在但 `listbuckets` 未返回的桶不产生影响。
+跳过的桶不会调用桶 endpoint、filelist、metadata 或 objectkeys，不生成总览，也不出现在桶级 manifest 条目中。配置中存在但 `listbuckets` 未返回的桶不产生影响。
 
 全局阈值缺失时的默认值为：大目录 `large_directory_bytes: 107374182400`（100 GiB）、大文件 `large_file_bytes: 10737418240`（10 GiB）、不活跃目录 `inactive_directory_days: 180`、发现深度 `filelist_depth: 5`。桶级对应字段缺失或显式为 `null` 时继承全局阈值。
 
@@ -79,6 +79,8 @@ applications:
 
 ```yaml
 scan:
+  overview_format: parquet
+  max_depth: 4
   bucket_concurrency: 4
   global_request_concurrency: 150
   metadata_concurrency_per_bucket: 8
@@ -99,11 +101,15 @@ scan:
 results/<run_id>/
 ```
 
-每个桶的目录汇总 CSV 写入：
+默认每个桶的 Parquet 总览写入：
 
 ```text
-results/<run_id>/<appid>/<bucket>.csv
+results/<run_id>/<appid>/<bucket>/part-00001.parquet
 ```
+
+Parquet 使用 Snappy 压缩，单个分片最多 50,000 行。`max_depth: 4` 时，根目录 `/` 是第 0 层；第 4 层以下的对象截断并累计到第 4 层，而较浅目录只统计直属文件。`file_type_map` 的完整默认映射见 `config/apps.example.yaml`，自定义扩展名会与默认值合并。
+
+如需原有 CSV，设置 `scan.overview_format: csv`，输出仍为 `results/<run_id>/<appid>/<bucket>.csv`，原字段和向祖先累计规则不变。
 
 ## 方式一：命令行启动扫描
 
@@ -254,35 +260,45 @@ curl -o owned-bucket.csv \
   http://127.0.0.1:8000/runs/manual-run-001/apps/com.camera.pergen/buckets/owned-bucket/csv
 ```
 
+CSV 下载接口仅适用于 `overview_format: csv`。Parquet 模式先从 manifest 的 `overview_files` 获取分片名，再逐个下载：
+
+```bash
+curl -o part-00001.parquet \
+  http://127.0.0.1:8000/runs/<run_id>/apps/<appid>/buckets/<bucket_name>/parquet/part-00001.parquet
+```
+
 ## 结果文件说明
 
 每次扫描会生成：
 
-- `results/<run_id>/manifest.json`：本次扫描的应用、桶、状态、CSV 路径、错误和时间。
+- `results/<run_id>/manifest.json`：本次扫描的应用、桶、状态、总览路径、错误和时间。桶条目包含 `overview_format`、`overview_path` 和 `overview_files`；兼容字段 `csv_path` 仅在 CSV 模式有值。
 - `results/<run_id>/scan.log`：扫描日志，包含 filelist 进度、metadata 的 `completed` / `total` / `succeeded` / `failed` 进度，以及 objectkeys 前缀的 `completed` / `total` / `succeeded` / `failed` / `pages` / `objects` 进度。metadata 的 `total` 是 filelist 生成的 metadata 任务数；当 `total=0` 时只写一条 `metadata skipped` 记录。
-- `results/<run_id>/<appid>/<bucket>.csv`：每个桶一个目录级汇总 CSV。
+- `results/<run_id>/<appid>/<bucket>/part-xxxxx.parquet`：默认的 Snappy Parquet 总览分片，每个最多 50,000 行。
+- `results/<run_id>/<appid>/<bucket>.csv`：仅在 `overview_format: csv` 时生成的旧目录级汇总。
 
-最终桶 CSV 只保存目录汇总信息，不保存完整文件清单。对象级临时 CSV 在扫描过程中写入 `results/<run_id>/_tmp/`。`scan.keep_temp_files` 默认为 `false`：每个桶一得到最终结果就会立即删除对应临时目录，然后才释放共享桶并发许可，无论桶最终为 `success`、`partial_failed` 还是 `failed`；设为 `true` 时则保留所有状态的临时目录。
+Parquet 字段依次为 `bucket_id`、`bucket_name`、`appid`、`path`、`object_count`、`total_size`、`max_file_size`、`last_modified`、`max_depth`、`file_types`，全部 non-null。`last_modified` 是最新 UTC 日期 `YYYY-MM-DD`，全部时间缺失时使用扫描开始日；`max_depth` 是当前 `path` 深度；`file_types` 是去重排序后的 JSON 数组，未知或无扩展名归为 `其他`。
 
-如果桶为空，或桶内只有空文件夹，扫描仍会成功，并生成只有表头的桶 CSV。
+最终总览不保存完整文件清单。对象级临时 CSV 在扫描过程中写入 `results/<run_id>/_tmp/`。`scan.keep_temp_files` 默认为 `false`：每个桶一得到最终结果就会立即删除对应临时目录，然后才释放共享桶并发许可，无论桶最终为 `success`、`partial_failed` 还是 `failed`；设为 `true` 时则保留所有状态的临时目录。
+
+如果桶为空，或桶内只有空文件夹，扫描仍会成功；Parquet 模式生成一个带完整 schema 的 0 行分片，CSV 模式生成只有表头的文件。
 
 ### 请求失败边界
 
 - `listbuckets`：桶集合未知，当前应用失败，其他应用继续。
-- `bucket_endpoint`：当前桶失败且不生成 CSV，其他桶继续。
+- `bucket_endpoint`：当前桶失败且不生成总览，其他桶继续。
 - `filelist`：停止失败目录（包括根目录 `/`）的剩余分页，保留早先成功页和其他已发现目录，桶为 `partial_failed`。
 - `metadata`：只跳过失败对象，其他对象继续，桶为 `partial_failed`。
 - `objectkeys`：停止失败前缀的剩余分页，保留早先成功页和其他前缀，桶为 `partial_failed`。
 
-### 如何判读部分 CSV
+### 如何判读部分总览
 
-使用 CSV 前必须先检查 manifest 中对应桶的 `status`。`success` 表示聚合完成且没有最终可恢复请求失败；`partial_failed` 表示 CSV 不完整。此时：
+使用 Parquet 或 CSV 前必须先检查 manifest 中对应桶的 `status`。`success` 表示聚合完成且没有最终可恢复请求失败；`partial_failed` 表示总览不完整。此时：
 
 - `error` 是简短汇总；
 - `partial_errors` 保留兼容计数和有限样本；
 - `errors` 保留每个最终请求失败的详细记录。
 
-部分 CSV 会保留已成功收集的行，并缺少只能从失败请求获得的数据。未检查上述状态和错误字段前，不得将部分 CSV 视为完整结果。每个桶还有 `started_ms` / `ended_ms`、UTC `started_at` / `ended_at` 和单调计时的 `elapsed_seconds`。总耗时进一步拆分为 `request_elapsed_seconds`（bucket endpoint、filelist、metadata、objectkeys 的采集阶段，包含并发等待、重试退避和响应解析）与 `processing_elapsed_seconds`（读取临时 CSV、去重、聚合并生成最终 CSV）。请求阶段失败时处理时间为 `0.0`；处理阶段失败时保留两个阶段已经发生的实际耗时。桶之间并发执行，因此不能把各桶阶段耗时简单相加当作整次扫描的墙钟时间。
+部分总览会保留已成功收集的行，并缺少只能从失败请求获得的数据。未检查上述状态和错误字段前，不得将其视为完整结果。每个桶还有 `started_ms` / `ended_ms`、UTC `started_at` / `ended_at` 和单调计时的 `elapsed_seconds`。总耗时进一步拆分为 `request_elapsed_seconds`（bucket endpoint、filelist、metadata、objectkeys 的采集阶段，包含并发等待、重试退避和响应解析）与 `processing_elapsed_seconds`（读取临时 CSV、聚合并生成最终总览）。请求阶段失败时处理时间为 `0.0`；处理阶段失败时保留两个阶段已经发生的实际耗时。桶之间并发执行，因此不能把各桶阶段耗时简单相加当作整次扫描的墙钟时间。
 
 ## 常见问题
 
@@ -300,7 +316,7 @@ OBS_SCAN_CONFIG=config/apps.yaml uvicorn obs_scan_platform.api:app --reload
 
 说明当前 API 进程已有扫描任务正在运行。等待当前扫描完成后再重试。
 
-### 结果 CSV 找不到
+### 结果总览找不到
 
 先查看 manifest：
 
@@ -308,4 +324,4 @@ OBS_SCAN_CONFIG=config/apps.yaml uvicorn obs_scan_platform.api:app --reload
 curl http://127.0.0.1:8000/runs/<run_id>
 ```
 
-确认对应 bucket 的 `status` 和 `csv_path`。如果是 `partial_failed`，CSV 可能存在，但必须结合 `error`、`partial_errors` 和 `errors` 判断缺失范围。
+确认对应 bucket 的 `status`、`overview_format`、`overview_path` 和 `overview_files`。CSV 模式可继续查看 `csv_path`。如果是 `partial_failed`，总览可能存在，但必须结合 `error`、`partial_errors` 和 `errors` 判断缺失范围。
