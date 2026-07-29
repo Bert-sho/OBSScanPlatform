@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import httpx
 import pytest
 
+from obs_scan_platform import obs_client as obs_client_module
 from obs_scan_platform.obs_client import OBSClient, OBSRequestError, encode_object_key, encode_request_body
 from obs_scan_platform.scan_coordination import ScanPhaseCoordinator
 
@@ -42,11 +43,16 @@ class RecordingCoordinator(ScanPhaseCoordinator):
 
 
 @pytest.mark.asyncio
-async def test_get_json_parses_response_inside_request_attempt(
+async def test_get_json_builds_request_and_validates_response_inside_request_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ):
     events: list[str] = []
+    original_has_failure_reason = obs_client_module._has_failure_reason
     original_json = httpx.Response.json
+
+    def recording_has_failure_reason(data: dict) -> bool:
+        events.append("business-validation")
+        return original_has_failure_reason(data)
 
     def recording_json(response: httpx.Response, **kwargs):
         events.append("json")
@@ -54,16 +60,38 @@ async def test_get_json_parses_response_inside_request_attempt(
 
     async def handler(request: httpx.Request) -> httpx.Response:
         events.append("send")
-        return httpx.Response(200, json={"value": 1}, request=request)
+        return httpx.Response(
+            200,
+            json={"success": False, "result": {"objects": {}}},
+            request=request,
+        )
 
+    monkeypatch.setattr(obs_client_module, "_has_failure_reason", recording_has_failure_reason)
     monkeypatch.setattr(httpx.Response, "json", recording_json)
     client = make_client(handler, phase_coordinator=RecordingCoordinator(events))
+    original_build_request = client.http.build_request
+
+    def recording_build_request(*args, **kwargs):
+        events.append("build-request")
+        return original_build_request(*args, **kwargs)
+
+    monkeypatch.setattr(client.http, "build_request", recording_build_request)
     try:
-        assert await client.get_json("/test", params={}) == {"value": 1}
+        assert await client.get_json("/test", params={}, endpoint="filelist") == {
+            "success": False,
+            "result": {"objects": {}},
+        }
     finally:
         await client.close()
 
-    assert events == ["scope-enter", "send", "json", "scope-exit"]
+    assert events == [
+        "scope-enter",
+        "build-request",
+        "send",
+        "json",
+        "business-validation",
+        "scope-exit",
+    ]
 
 
 @pytest.mark.asyncio

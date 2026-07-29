@@ -153,9 +153,10 @@ class OBSClient:
     ) -> dict[str, Any]:
         max_attempts = self.max_retries + 1
         for attempt_number in range(1, max_attempts + 1):
-            request = self.http.build_request("GET", url, params=params, headers=headers)
+            request: httpx.Request | None = None
             try:
                 async with self.phase_coordinator.request_attempt():
+                    request = self.http.build_request("GET", url, params=params, headers=headers)
                     response = await self.http.send(request)
                     if response.status_code >= 400:
                         body, truncated, original_chars = _bounded_body(response.text)
@@ -209,6 +210,8 @@ class OBSClient:
                 if not _is_retryable(error) or attempt_number == max_attempts:
                     raise
             except httpx.RequestError as exc:
+                if request is None:
+                    raise
                 error = OBSRequestError(
                     endpoint=endpoint,
                     status_code=None,

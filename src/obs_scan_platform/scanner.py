@@ -157,7 +157,6 @@ class Scanner:
     def __init__(self, config: AppConfigFile, *, show_progress: bool = False) -> None:
         self.config = config
         self.show_progress = show_progress
-        self.phase_coordinator = ScanPhaseCoordinator(config.scan.global_request_concurrency)
 
     async def run(self, run_id: str | None = None, appid: str | None = None) -> dict[str, Any]:
         run_id = run_id or _default_run_id()
@@ -172,6 +171,7 @@ class Scanner:
 
         LOGGER.info("scan start run_id=%s applications=%s", run_id, len(applications))
         bucket_semaphore = asyncio.Semaphore(self.config.scan.bucket_concurrency)
+        phase_coordinator = ScanPhaseCoordinator(self.config.scan.global_request_concurrency)
 
         app_entries = await asyncio.gather(
             *(
@@ -181,6 +181,7 @@ class Scanner:
                     results_dir,
                     started_ms,
                     bucket_semaphore,
+                    phase_coordinator,
                 )
                 for application in applications
             )
@@ -210,6 +211,7 @@ class Scanner:
         results_dir: Path,
         scan_started_ms: int,
         bucket_semaphore: asyncio.Semaphore,
+        phase_coordinator: ScanPhaseCoordinator,
     ) -> dict[str, Any]:
         LOGGER.info("application start appid=%s", application.appid)
         missing_fields = self.config.missing_scan_fields(application)
@@ -237,7 +239,7 @@ class Scanner:
         ) as http:
             client = OBSClient(
                 http=http,
-                phase_coordinator=self.phase_coordinator,
+                phase_coordinator=phase_coordinator,
                 max_retries=self.config.scan.max_retries,
                 retry_base_delay_seconds=self.config.scan.retry_base_delay_seconds,
                 retry_max_delay_seconds=self.config.scan.retry_max_delay_seconds,
@@ -257,6 +259,7 @@ class Scanner:
                                 run_id,
                                 results_dir,
                                 scan_started_ms,
+                                phase_coordinator=phase_coordinator,
                             )
                         except Exception as exc:
                             ended_ms = _now_ms()
@@ -371,6 +374,8 @@ class Scanner:
         run_id: str,
         results_dir: Path,
         scan_started_ms: int,
+        *,
+        phase_coordinator: ScanPhaseCoordinator,
     ) -> BucketScanResult:
         started_ms = _now_ms()
         bucket_started = time.monotonic()
@@ -419,7 +424,7 @@ class Scanner:
                 partial_errors,
             )
             phase_boundary = time.monotonic()
-            async with self.phase_coordinator.aggregation():
+            async with phase_coordinator.aggregation():
                 if overview_format == "csv":
                     aggregate_bucket(
                         run_id=run_id,

@@ -1,13 +1,19 @@
+import asyncio
 import base64
 import csv
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
+from obs_scan_platform import scanner as scanner_module
 from obs_scan_platform.config import AppConfigFile, ApplicationConfig, Thresholds
+from obs_scan_platform.models import BucketInfo, BucketScanResult, ScanStatus
 from obs_scan_platform.obs_client import OBSRequestError
+from obs_scan_platform.scan_coordination import ScanPhaseCoordinator
 from obs_scan_platform.scanner import Scanner
 
 
@@ -28,6 +34,200 @@ class DummyAsyncClient:
 
     async def __aexit__(self, *args: Any) -> None:
         pass
+
+
+class BarrierHTTPHarness:
+    def __init__(
+        self,
+        buckets_by_app: dict[str, list[str]],
+        *,
+        paged_bucket: str,
+        ready_buckets: set[str],
+        failing_aggregations: set[str] | None = None,
+    ) -> None:
+        self.buckets_by_app = buckets_by_app
+        self.paged_bucket = paged_bucket
+        self.ready_buckets = ready_buckets
+        self.failing_aggregations = failing_aggregations or set()
+        self.active_page_started = asyncio.Event()
+        self.release_active_page = asyncio.Event()
+        self.next_page_admitted = asyncio.Event()
+        self.aggregation_waiters: asyncio.Queue[None] = asyncio.Queue()
+        self.events: list[str] = []
+
+    async def send(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        params = dict(request.url.params)
+        if path.endswith("/rest/s3/listbuckets"):
+            appid = params["appid"]
+            return self._response(
+                request,
+                {
+                    "buckets": [
+                        {
+                            "id": f"{bucket_name}-id",
+                            "name": bucket_name,
+                            "vendor": "HEC",
+                            "region": "cn-east-3",
+                            "auth": "owner",
+                            "shareFrom": None,
+                        }
+                        for bucket_name in self.buckets_by_app[appid]
+                    ]
+                },
+            )
+        if path.endswith("/rest/s3/bucket/endpoint"):
+            return self._response(request, f"https://{params['bucketid']}.example")
+        if path.endswith("/rest/s3/bucket/filelist"):
+            request_body = _decode_base64_json(params["requestbody"])
+            bucket_name = str(request_body["id"]).removesuffix("-id")
+            return self._response(
+                request,
+                {
+                    "files": [{"objectType": "folder", "objectKey": f"{bucket_name}/"}],
+                    "nextOffset": "",
+                },
+            )
+        if path.endswith("/rest/boto3/s3/list/bucket/objectkeys"):
+            bucket_name = params["bucketid"]
+            marker = params["nextmarker"]
+            if bucket_name == self.paged_bucket and not marker:
+                self.active_page_started.set()
+                await self.release_active_page.wait()
+                return self._response(
+                    request,
+                    {
+                        "objectkeys": [
+                            {
+                                "objectKey": f"{bucket_name}/current.txt",
+                                "size": "5",
+                                "lastModifyTime": "2000",
+                            }
+                        ],
+                        "truncated": "true",
+                        "nextmarker": "page-2",
+                    },
+                )
+            if bucket_name == self.paged_bucket:
+                self.events.append("next-request-admitted")
+                self.next_page_admitted.set()
+                return self._response(
+                    request,
+                    {"objectkeys": [], "truncated": "false"},
+                )
+            if bucket_name in self.ready_buckets:
+                await self.active_page_started.wait()
+                return self._response(
+                    request,
+                    {"objectkeys": [], "truncated": "false"},
+                )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    @staticmethod
+    def _response(request: httpx.Request, result: Any) -> httpx.Response:
+        return httpx.Response(200, json={"result": result}, request=request)
+
+
+def _barrier_config(tmp_path: Path, buckets_by_app: dict[str, list[str]]) -> AppConfigFile:
+    config = AppConfigFile(
+        endpoint="https://global-obs-api.example",
+        defaults=Thresholds(
+            large_directory_bytes=10,
+            large_file_bytes=10,
+            inactive_directory_days=30,
+            filelist_depth=1,
+        ),
+        applications=[
+            ApplicationConfig(
+                appid=appid,
+                name=appid,
+                apptoken=f"token-{index}",
+            )
+            for index, appid in enumerate(buckets_by_app, start=1)
+        ],
+    )
+    config.scan.results_dir = str(tmp_path / "results")
+    config.scan.overview_format = "csv"
+    config.scan.keep_temp_files = True
+    config.scan.bucket_concurrency = 10
+    config.scan.global_request_concurrency = 10
+    config.scan.objectkeys_concurrency_per_bucket = 1
+    config.scan.metadata_concurrency_per_bucket = 1
+    config.scan.max_retries = 0
+    return config
+
+
+def _install_barrier_harness(
+    monkeypatch: pytest.MonkeyPatch,
+    harness: BarrierHTTPHarness,
+) -> None:
+    real_coordinator_type = ScanPhaseCoordinator
+    real_async_client_type = httpx.AsyncClient
+
+    def make_coordinator(max_concurrent_requests: int) -> ScanPhaseCoordinator:
+        coordinator = real_coordinator_type(max_concurrent_requests)
+        real_aggregation = coordinator.aggregation
+
+        @asynccontextmanager
+        async def instrumented_aggregation():
+            context = real_aggregation()
+            entry_started = asyncio.Event()
+
+            async def enter_real_scope() -> None:
+                entry_started.set()
+                await context.__aenter__()
+
+            entry_task = asyncio.create_task(enter_real_scope())
+            await entry_started.wait()
+            harness.aggregation_waiters.put_nowait(None)
+            await entry_task
+            try:
+                yield
+            finally:
+                await context.__aexit__(None, None, None)
+
+        coordinator.aggregation = instrumented_aggregation
+        return coordinator
+
+    original_append_object_rows = scanner_module.append_object_rows
+
+    def recording_append_object_rows(path: Path, rows) -> None:
+        rows = list(rows)
+        original_append_object_rows(path, rows)
+        if path.parent.name == harness.paged_bucket and rows:
+            harness.events.append("page-appended")
+
+    def recording_aggregate_bucket(**kwargs: Any) -> int:
+        bucket_name = kwargs["bucket_name"]
+        harness.events.append(f"aggregation:{bucket_name}")
+        if bucket_name in harness.failing_aggregations:
+            raise RuntimeError(f"aggregation failed for {bucket_name}")
+        return 0
+
+    monkeypatch.setattr(scanner_module, "ScanPhaseCoordinator", make_coordinator)
+    monkeypatch.setattr(
+        scanner_module.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: real_async_client_type(transport=httpx.MockTransport(harness.send)),
+    )
+    monkeypatch.setattr(scanner_module, "append_object_rows", recording_append_object_rows)
+    monkeypatch.setattr(scanner_module, "aggregate_bucket", recording_aggregate_bucket)
+
+
+async def _run_barrier_scan(
+    scanner: Scanner,
+    harness: BarrierHTTPHarness,
+    *,
+    run_id: str,
+    waiting_aggregations: int,
+) -> dict[str, Any]:
+    scan_task = asyncio.create_task(scanner.run(run_id=run_id))
+    await asyncio.wait_for(harness.active_page_started.wait(), timeout=2)
+    for _ in range(waiting_aggregations):
+        await asyncio.wait_for(harness.aggregation_waiters.get(), timeout=2)
+    assert not harness.next_page_admitted.is_set()
+    harness.release_active_page.set()
+    return await asyncio.wait_for(scan_task, timeout=5)
 
 
 class FakeOBSClient:
@@ -451,10 +651,7 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
 
     fake_client = FakeOBSClient.instances[0]
     assert len(FakeOBSClient.instances) == len(config.applications)
-    assert all(
-        client.phase_coordinator is scanner.phase_coordinator
-        for client in FakeOBSClient.instances
-    )
+    assert len({id(client.phase_coordinator) for client in FakeOBSClient.instances}) == 1
     called_urls = [call["url"] for call in fake_client.calls]
     assert any(url.endswith("/rest/s3/listbuckets") for url in called_urls)
     assert any(url.endswith("/rest/s3/bucket/endpoint") for url in called_urls)
@@ -514,6 +711,139 @@ async def test_scanner_run_completes_with_mocked_obs_and_directory_csv(tmp_path:
     persisted_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert persisted_manifest["status"] == "success"
     assert persisted_manifest["applications"][0]["buckets"][0]["csv_path"] == str(csv_path)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_runs_on_one_scanner_use_distinct_run_coordinators(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    FakeOBSClient.instances.clear()
+    monkeypatch.setattr("obs_scan_platform.scanner.httpx.AsyncClient", DummyAsyncClient)
+    monkeypatch.setattr("obs_scan_platform.scanner.OBSClient", FakeOBSClient)
+    config = _barrier_config(tmp_path, {"app.one": ["one"], "app.two": ["two"]})
+    scanner = Scanner(config)
+    both_runs_started = asyncio.Event()
+    entered_run_ids: set[str] = set()
+    bucket_coordinators: list[tuple[str, FakeOBSClient, object | None]] = []
+
+    async def fake_list_buckets(application, client):
+        del client
+        return [BucketInfo(f"{application.appid}-id", application.appid, "HEC", "cn-east-3", "owner", None)]
+
+    async def recording_scan_bucket(
+        application,
+        bucket,
+        client,
+        run_id,
+        results_dir,
+        scan_started_ms,
+        *,
+        phase_coordinator=None,
+    ):
+        del results_dir, scan_started_ms
+        bucket_coordinators.append((run_id, client, phase_coordinator))
+        entered_run_ids.add(run_id)
+        if len(entered_run_ids) == 2:
+            both_runs_started.set()
+        await both_runs_started.wait()
+        return BucketScanResult(
+            appid=application.appid,
+            bucket_name=bucket.name,
+            bucket_id=bucket.bucket_id,
+            status=ScanStatus.SUCCESS,
+            csv_path=None,
+            thresholds=config.defaults,
+        )
+
+    monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+    monkeypatch.setattr(scanner, "_scan_bucket", recording_scan_bucket)
+
+    await asyncio.wait_for(
+        asyncio.gather(
+            scanner.run(run_id="run-a"),
+            scanner.run(run_id="run-b"),
+        ),
+        timeout=5,
+    )
+
+    coordinator_ids_by_run: dict[str, set[int]] = {}
+    for run_id in ("run-a", "run-b"):
+        run_records = [record for record in bucket_coordinators if record[0] == run_id]
+        assert len({id(client) for _, client, _ in run_records}) == len(config.applications)
+        assert all(coordinator is client.phase_coordinator for _, client, coordinator in run_records)
+        coordinator_ids_by_run[run_id] = {
+            id(client.phase_coordinator)
+            for _, client, _ in run_records
+        }
+        assert len(coordinator_ids_by_run[run_id]) == 1
+
+    assert coordinator_ids_by_run["run-a"].isdisjoint(coordinator_ids_by_run["run-b"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("buckets_by_app", "ready_buckets", "failing_aggregations"),
+    [
+        (
+            {"app.one": ["ready-bucket", "paged-bucket"]},
+            {"ready-bucket"},
+            set(),
+        ),
+        (
+            {"app.one": ["ready-one"], "app.two": ["ready-two", "paged-bucket"]},
+            {"ready-one", "ready-two"},
+            set(),
+        ),
+        (
+            {"app.one": ["failing-bucket", "paged-bucket"]},
+            {"failing-bucket"},
+            {"failing-bucket"},
+        ),
+    ],
+    ids=["page-before-aggregation", "cross-application-writers", "failure-reopens-admission"],
+)
+async def test_scanner_composed_barrier_orders_processing_aggregations_and_requests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    buckets_by_app: dict[str, list[str]],
+    ready_buckets: set[str],
+    failing_aggregations: set[str],
+):
+    harness = BarrierHTTPHarness(
+        buckets_by_app,
+        paged_bucket="paged-bucket",
+        ready_buckets=ready_buckets,
+        failing_aggregations=failing_aggregations,
+    )
+    _install_barrier_harness(monkeypatch, harness)
+    scanner = Scanner(_barrier_config(tmp_path, buckets_by_app))
+
+    manifest = await _run_barrier_scan(
+        scanner,
+        harness,
+        run_id="composed-barrier",
+        waiting_aggregations=len(ready_buckets),
+    )
+
+    ready_event_count = len(ready_buckets)
+    assert harness.events[0] == "page-appended"
+    assert set(harness.events[1 : ready_event_count + 1]) == {
+        f"aggregation:{bucket_name}" for bucket_name in ready_buckets
+    }
+    assert harness.events[ready_event_count + 1 :] == [
+        "next-request-admitted",
+        "aggregation:paged-bucket",
+    ]
+    assert manifest["status"] == ("partial_failed" if failing_aggregations else "success")
+    if failing_aggregations:
+        buckets = {
+            bucket["bucket_name"]: bucket
+            for application in manifest["applications"]
+            for bucket in application["buckets"]
+        }
+        assert buckets["failing-bucket"]["error"] == "aggregation failed for failing-bucket"
+        assert buckets["paged-bucket"]["status"] == "success"
 
 
 @pytest.mark.asyncio

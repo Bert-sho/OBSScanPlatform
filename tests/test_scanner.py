@@ -290,6 +290,10 @@ def make_scanner() -> tuple[Scanner, ApplicationConfig, BucketInfo]:
     return Scanner(config), application, bucket
 
 
+def make_phase_coordinator(scanner: Scanner) -> ScanPhaseCoordinator:
+    return ScanPhaseCoordinator(scanner.config.scan.global_request_concurrency)
+
+
 def second_application() -> ApplicationConfig:
     return ApplicationConfig(
         appid="app.two",
@@ -1224,7 +1228,15 @@ async def test_scan_bucket_root_overflow_skips_metadata_and_scans_root_prefix(tm
         }
     )
 
-    result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        client,
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+        phase_coordinator=make_phase_coordinator(scanner),
+    )
 
     assert result.status == ScanStatus.SUCCESS
     assert client.phase_events == ["bucket_endpoint", "filelist", "objectkeys"]
@@ -1438,7 +1450,15 @@ async def test_scan_bucket_treats_empty_filelist_objects_as_empty_bucket(tmp_pat
         ]
     )
 
-    result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        client,
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+        phase_coordinator=make_phase_coordinator(scanner),
+    )
 
     assert result.status == ScanStatus.SUCCESS
     assert [call["url"].rsplit("/", 1)[-1] for call in client.calls] == ["endpoint", "filelist", "filelist"]
@@ -1547,7 +1567,15 @@ async def test_scan_shared_bucket_treats_empty_objectkeys_success_false_as_empty
         retry_max_delay_seconds=0,
     )
     try:
-        result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+        result = await scanner._scan_bucket(
+            application,
+            bucket,
+            client,
+            "run-1",
+            tmp_path,
+            scan_started_ms=1000,
+            phase_coordinator=client.phase_coordinator,
+        )
     finally:
         await client.close()
 
@@ -1590,6 +1618,7 @@ async def test_scan_application_applies_configured_httpx_keepalive_expiry(
     monkeypatch.setattr("obs_scan_platform.scanner.httpx.AsyncClient", CapturingAsyncClient)
     monkeypatch.setattr("obs_scan_platform.scanner.OBSClient", CapturingOBSClient)
     monkeypatch.setattr(scanner, "_list_buckets", fake_list_buckets)
+    phase_coordinator = make_phase_coordinator(scanner)
 
     result = await scanner._scan_application(
         application,
@@ -1597,11 +1626,12 @@ async def test_scan_application_applies_configured_httpx_keepalive_expiry(
         tmp_path,
         scan_started_ms=1000,
         bucket_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=phase_coordinator,
     )
 
     assert result["status"] == ScanStatus.SUCCESS.value
     assert captured["timeout"] == 47
-    assert captured_obs_client_kwargs["phase_coordinator"] is scanner.phase_coordinator
+    assert captured_obs_client_kwargs["phase_coordinator"] is phase_coordinator
     limits = captured["limits"]
     assert isinstance(limits, httpx.Limits)
     assert limits.max_connections == 100
@@ -1632,8 +1662,10 @@ async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_fail
         run_id: str,
         results_dir: Path,
         scan_started_ms: int,
+        *,
+        phase_coordinator: ScanPhaseCoordinator,
     ) -> BucketScanResult:
-        del client, run_id, scan_started_ms
+        del client, run_id, scan_started_ms, phase_coordinator
         if bucket.name == "bad-bucket":
             temp_dir = results_dir / scanner.config.scan.temp_subdir / app.appid / bucket.name
             temp_dir.mkdir(parents=True)
@@ -1656,6 +1688,7 @@ async def test_scan_application_keeps_other_buckets_after_unexpected_bucket_fail
         tmp_path,
         scan_started_ms=1000,
         bucket_semaphore=asyncio.Semaphore(scanner.config.scan.bucket_concurrency),
+        phase_coordinator=make_phase_coordinator(scanner),
     )
 
     assert result["status"] == ScanStatus.PARTIAL_FAILED.value
@@ -1694,6 +1727,7 @@ async def test_scan_application_rejects_missing_operational_field_before_http(
         tmp_path,
         scan_started_ms=1000,
         bucket_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=make_phase_coordinator(scanner),
     )
 
     assert result["status"] == "failed"
@@ -1791,9 +1825,11 @@ async def test_run_applies_bucket_concurrency_globally_across_applications(
         run_id: str,
         results_dir: Path,
         scan_started_ms: int,
+        *,
+        phase_coordinator: ScanPhaseCoordinator,
     ) -> BucketScanResult:
         nonlocal active, peak
-        del client, run_id, results_dir, scan_started_ms
+        del client, run_id, results_dir, scan_started_ms, phase_coordinator
         active += 1
         peak = max(peak, active)
         await asyncio.sleep(0.01)
@@ -2342,7 +2378,15 @@ async def test_scan_bucket_finishes_filelist_and_metadata_before_objectkeys(tmp_
     scanner.config.scan.objectkeys_concurrency_per_bucket = 1
     client = PhaseOrderClient()
 
-    result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        client,
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+        phase_coordinator=make_phase_coordinator(scanner),
+    )
 
     assert result.status == ScanStatus.SUCCESS
     assert client.phase_events == ["bucket_endpoint", "filelist", "metadata", "objectkeys"]
@@ -2372,7 +2416,7 @@ async def test_scan_bucket_passes_aggregation_memory_and_retention_config(
     scanner.config.scan.keep_temp_files = True
     calls: list[dict[str, Any]] = []
     events: list[str] = []
-    scanner.phase_coordinator = RecordingAggregationCoordinator(events)
+    phase_coordinator = RecordingAggregationCoordinator(events)
 
     def capture_aggregate_bucket(**kwargs):
         calls.append(kwargs)
@@ -2388,6 +2432,7 @@ async def test_scan_bucket_passes_aggregation_memory_and_retention_config(
         "run-1",
         tmp_path,
         scan_started_ms=1000,
+        phase_coordinator=phase_coordinator,
     )
 
     assert result.status == ScanStatus.SUCCESS
@@ -2515,7 +2560,15 @@ async def test_bucket_continues_to_objectkeys_after_metadata_task_failure(tmp_pa
     scanner.config.defaults.filelist_depth = 1
     client = UnexpectedMetadataBucketScanClient()
 
-    result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        client,
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+        phase_coordinator=make_phase_coordinator(scanner),
+    )
 
     assert result.status == ScanStatus.PARTIAL_FAILED
     assert result.error == "1 failures; metadata=1; first: metadata target=bad.txt reason=metadata parser bug"
@@ -2532,7 +2585,15 @@ async def test_invalid_metadata_marks_bucket_partial_failed_and_objectkeys_still
     scanner.config.defaults.filelist_depth = 1
     client = InvalidMetadataBucketScanClient()
 
-    result = await scanner._scan_bucket(application, bucket, client, "run-1", tmp_path, scan_started_ms=1000)
+    result = await scanner._scan_bucket(
+        application,
+        bucket,
+        client,
+        "run-1",
+        tmp_path,
+        scan_started_ms=1000,
+        phase_coordinator=make_phase_coordinator(scanner),
+    )
 
     assert result.status == ScanStatus.PARTIAL_FAILED
     assert result.error == (
@@ -2558,6 +2619,7 @@ async def test_scan_bucket_returns_partial_failed_with_csv_for_objectkeys_failur
         "run-1",
         tmp_path,
         scan_started_ms=1000,
+        phase_coordinator=make_phase_coordinator(scanner),
     )
 
     assert result.status == ScanStatus.PARTIAL_FAILED
@@ -2591,6 +2653,7 @@ async def test_scan_bucket_endpoint_request_failure_has_detail_and_timing(
         "run-1",
         tmp_path,
         scan_started_ms=500,
+        phase_coordinator=make_phase_coordinator(scanner),
     )
 
     assert result.status == ScanStatus.FAILED
@@ -2623,6 +2686,7 @@ async def test_bucket_result_records_start_end_and_elapsed(tmp_path: Path, monke
         "run-1",
         tmp_path,
         scan_started_ms=500,
+        phase_coordinator=make_phase_coordinator(scanner),
     )
 
     assert result.started_ms == 1_000
@@ -2658,6 +2722,7 @@ async def test_bucket_result_records_request_and_processing_timing_when_processi
         "run-1",
         tmp_path,
         scan_started_ms=500,
+        phase_coordinator=make_phase_coordinator(scanner),
     )
 
     assert result.status == ScanStatus.FAILED
@@ -2688,6 +2753,7 @@ async def test_scan_bucket_writes_header_only_csv_for_empty_bucket_and_logs_elap
             "run-1",
             tmp_path,
             scan_started_ms=1000,
+            phase_coordinator=make_phase_coordinator(scanner),
         )
 
     assert result.status == ScanStatus.SUCCESS
@@ -2716,7 +2782,7 @@ async def test_scan_bucket_aggregates_parquet_inside_global_writer_scope(
 ):
     scanner, application, bucket = make_scanner()
     events: list[str] = []
-    scanner.phase_coordinator = RecordingAggregationCoordinator(events)
+    phase_coordinator = RecordingAggregationCoordinator(events)
     scanner.config.scan.overview_format = "parquet"
     part_path = tmp_path / application.appid / bucket.name / "part-00001.parquet"
 
@@ -2741,6 +2807,7 @@ async def test_scan_bucket_aggregates_parquet_inside_global_writer_scope(
         "run-1",
         tmp_path,
         scan_started_ms=1000,
+        phase_coordinator=phase_coordinator,
     )
 
     assert events == [
@@ -2770,6 +2837,7 @@ async def test_scan_bucket_writes_default_parquet_overview_and_manifest_paths(tm
         "run-1",
         tmp_path,
         scan_started_ms=1_785_283_200_000,
+        phase_coordinator=make_phase_coordinator(scanner),
     )
 
     overview_dir = tmp_path / application.appid / bucket.name
@@ -2824,6 +2892,7 @@ async def test_scan_application_deletes_each_bucket_temp_dir_after_final_result(
         tmp_path,
         scan_started_ms=1000,
         bucket_semaphore=asyncio.Semaphore(1),
+        phase_coordinator=make_phase_coordinator(scanner),
     )
 
     assert not temp_dir.exists()
@@ -2852,8 +2921,10 @@ async def test_finished_bucket_temp_dir_is_deleted_before_sibling_finishes(
         run_id: str,
         results_dir: Path,
         scan_started_ms: int,
+        *,
+        phase_coordinator: ScanPhaseCoordinator,
     ) -> BucketScanResult:
-        del client, run_id, scan_started_ms
+        del client, run_id, scan_started_ms, phase_coordinator
         temp_dir = results_dir / scanner.config.scan.temp_subdir / app.appid / bucket.name
         temp_dir.mkdir(parents=True)
         if bucket.name == "first":
@@ -2879,6 +2950,7 @@ async def test_finished_bucket_temp_dir_is_deleted_before_sibling_finishes(
             tmp_path,
             scan_started_ms=1000,
             bucket_semaphore=asyncio.Semaphore(2),
+            phase_coordinator=make_phase_coordinator(scanner),
         )
     )
     await first_returned.wait()
@@ -2918,8 +2990,10 @@ async def test_cleanup_failure_returns_failed_bucket_and_waits_for_sibling(
         run_id: str,
         results_dir: Path,
         scan_started_ms: int,
+        *,
+        phase_coordinator: ScanPhaseCoordinator,
     ) -> BucketScanResult:
-        del client, run_id, scan_started_ms
+        del client, run_id, scan_started_ms, phase_coordinator
         temp_dir = results_dir / scanner.config.scan.temp_subdir / app.appid / bucket.name
         temp_dir.mkdir(parents=True)
         if bucket.name == "sibling":
@@ -2956,6 +3030,7 @@ async def test_cleanup_failure_returns_failed_bucket_and_waits_for_sibling(
             tmp_path,
             scan_started_ms=1000,
             bucket_semaphore=asyncio.Semaphore(2),
+            phase_coordinator=make_phase_coordinator(scanner),
         )
     )
     await sibling_started.wait()
