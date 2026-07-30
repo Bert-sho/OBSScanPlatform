@@ -40,7 +40,7 @@ class ScanSettings(BaseModel):
     temp_subdir: str = "_tmp"
     keep_temp_files: bool = False
     overview_format: Literal["csv", "parquet"] = "parquet"
-    max_depth: int = Field(default=4, ge=0)
+    aggregation_depth: int = Field(default=4, ge=0)
     file_type_map: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_FILE_TYPE_MAP))
     page_size: int = 1000
     bucket_concurrency: int = 4
@@ -56,6 +56,21 @@ class ScanSettings(BaseModel):
     filelist_task_limit_per_bucket: int = 100
     metadata_task_limit_per_bucket: int = 10000
     aggregation_max_directories_in_memory: int = Field(default=100000, ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_max_depth(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        has_canonical = "aggregation_depth" in value
+        has_legacy = "max_depth" in value
+        if has_canonical and has_legacy:
+            raise ValueError("aggregation_depth and max_depth cannot both be configured")
+        if not has_legacy:
+            return value
+        migrated = dict(value)
+        migrated["aggregation_depth"] = migrated.pop("max_depth")
+        return migrated
 
     @field_validator("file_type_map", mode="before")
     @classmethod

@@ -104,6 +104,18 @@ def test_config_apps_masks_tokens(tmp_path: Path):
     assert "secret-token" not in response.text
 
 
+def test_config_apps_normalizes_legacy_max_depth_to_aggregation_depth(tmp_path: Path):
+    config_file = tmp_path / "apps.yaml"
+    config_file.write_text("scan:\n  max_depth: 3\n", encoding="utf-8")
+    client = TestClient(api.create_app(config_path=config_file, results_dir=tmp_path / "results"))
+
+    response = client.get("/config/apps")
+
+    assert response.status_code == 200
+    assert response.json()["scan"]["aggregation_depth"] == 3
+    assert "max_depth" not in response.json()["scan"]
+
+
 def test_module_app_reads_config_from_environment(tmp_path: Path, monkeypatch):
     config_path = tmp_path / "apps.yaml"
     _write_config(config_path)
