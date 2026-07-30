@@ -455,6 +455,7 @@ sequenceDiagram
 - 所有已启用应用并发启动。
 - `bucket_concurrency` 是一次 `Scanner.run` 全局共享的 semaphore，覆盖桶从请求开始、聚合到临时清理的完整生命周期，而不是每个应用各自一份。
 - `global_request_concurrency` 限制本次运行所有应用、所有桶的 HTTP 请求尝试。每个应用有独立 HTTPX client，但共享同一个 `ScanPhaseCoordinator`。
+- 每个应用的 HTTPX client 固定使用 `max_connections=100`、`max_keepalive_connections=20`，keep-alive 时长由配置控制；因此全局请求上限是外层准入上限，不保证存在同等数量的同时活动 socket。
 - metadata 每桶最多使用 `metadata_concurrency_per_bucket` 个 worker。
 - objectkeys 每桶使用前述新/旧配置优先级确定 worker 数。
 - filelist 同一层的目录任务并发提交，但仍受全局请求并发约束。
