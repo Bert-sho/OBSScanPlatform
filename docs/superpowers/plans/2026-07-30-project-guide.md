@@ -44,8 +44,8 @@
 Run these read-only commands before drafting:
 
 ```powershell
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m obs_scan_platform.cli --help
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m obs_scan_platform.cli scan --help
+& '.superpowers\sdd\.venv\Scripts\obs-scan.exe' --help
+& '.superpowers\sdd\.venv\Scripts\obs-scan.exe' scan --help
 rg -n '@app\.(get|post)|def bucket_|def config_apps|def runs|def run_' src/obs_scan_platform/api.py
 rg -n '^class (ScanSettings|Thresholds|BucketOverrides|ApplicationConfig|AppConfigFile)' src/obs_scan_platform/config.py
 rg -n 'PARQUET_SCHEMA|MAX_PARQUET_ROWS_PER_FILE|CSV_FIELDS|DIRECTORY' src/obs_scan_platform/aggregation.py src/obs_scan_platform/parquet_aggregation.py
@@ -252,8 +252,8 @@ write real credentials.
 Run:
 
 ```powershell
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m obs_scan_platform.cli --help
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m obs_scan_platform.cli scan --help
+& '.superpowers\sdd\.venv\Scripts\obs-scan.exe' --help
+& '.superpowers\sdd\.venv\Scripts\obs-scan.exe' scan --help
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_cli.py tests/test_api.py -k "health or config_apps or post_runs or parquet" -q
 ```
 
