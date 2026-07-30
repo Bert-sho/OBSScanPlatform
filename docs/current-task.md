@@ -51,10 +51,12 @@ Windows suite still contains the same five pre-existing portability failures.
   architecture notes, approved design, and implementation plan.
 - Completed a local whole-branch review with no remaining Critical or Important
   finding.
+- Pushed `codex/parquet-overview` to GitHub through `45588ef`; the final
+  push-status record is committed and pushed as the last delivery action.
 
 ## Remaining work
 
-- Commit this final handoff record and push `codex/parquet-overview`.
+- No requested implementation or review work remains.
 - Run a representative live OBS scan when an environment is available.
 - Address the five unrelated Windows portability failures in a separate task.
 

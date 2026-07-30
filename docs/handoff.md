@@ -28,6 +28,7 @@
 - `06d0440` — `fix: report deepest file level in parquet`
 - `b6a19b8` — `fix: pass canonical parquet aggregation depth`
 - `62b0b5c` — `docs: distinguish aggregation and file depth`
+- `45588ef` — `docs: finalize parquet depth semantics handoff`
 - The final handoff commit is the commit containing the latest version of this
   file; resolve its exact hash with `git log -1 --oneline` after fetching.
 
@@ -117,14 +118,22 @@ policy therefore keeps `docs/current-task.md` at `wip`.
 
 ## Push status
 
-Pending final handoff commit and `git push -u origin HEAD`.
+`git push -u origin HEAD` succeeded for `codex/parquet-overview` through
+`45588ef`:
+
+```text
+fcb57b9..45588ef  HEAD -> codex/parquet-overview
+```
+
+The final documentation commit containing this push record is pushed
+immediately after creation, followed by an explicit local/remote HEAD equality
+check.
 
 ## Uncommitted changes, if any
 
-At this snapshot only `docs/current-task.md` and `docs/handoff.md` contain the
-final evidence update. They are committed before the first push. Push-result
-documentation is committed and pushed as a final follow-up action. Expected
-final working tree state: clean.
+At this push-result snapshot only `docs/current-task.md` and `docs/handoff.md`
+are uncommitted. They are committed and pushed as the final follow-up action.
+Expected final working tree state: clean.
 
 ## Exact resume instructions for the next Codex session
 
