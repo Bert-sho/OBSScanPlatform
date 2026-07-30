@@ -9,7 +9,7 @@ from obs_scan_platform.models import ObjectRow
 
 
 @pytest.mark.parametrize(
-    ("object_key", "max_depth", "expected"),
+    ("object_key", "aggregation_depth", "expected"),
     [
         ("root.txt", 4, "/"),
         ("a/direct.txt", 4, "/a/"),
@@ -21,12 +21,26 @@ from obs_scan_platform.models import ObjectRow
 )
 def test_attributed_directory_path_maps_each_object_once(
     object_key: str,
-    max_depth: int,
+    aggregation_depth: int,
     expected: str,
 ):
     from obs_scan_platform.parquet_aggregation import attributed_directory_path
 
-    assert attributed_directory_path(object_key, max_depth) == expected
+    assert attributed_directory_path(object_key, aggregation_depth) == expected
+
+
+@pytest.mark.parametrize(
+    ("object_key", "expected"),
+    [
+        ("file.txt", 0),
+        ("/a/b/file.txt", 2),
+        ("/a/b/c/d/e/file.txt", 5),
+    ],
+)
+def test_file_directory_depth_excludes_filename(object_key: str, expected: int):
+    from obs_scan_platform.parquet_aggregation import file_directory_depth
+
+    assert file_directory_depth(object_key) == expected
 
 
 @pytest.mark.parametrize(
@@ -52,12 +66,12 @@ def test_parquet_directory_summary_combines_numeric_date_and_type_metrics():
 
     left = summary_for_object(
         ObjectRow("a/direct.JPG", 7, 1_700_000_000_000),
-        max_depth=4,
+        aggregation_depth=1,
         file_type_map=DEFAULT_FILE_TYPE_MAP,
     )
     right = summary_for_object(
-        ObjectRow("a/other.bin", 11, None),
-        max_depth=4,
+        ObjectRow("a/b/c/other.bin", 11, None),
+        aggregation_depth=1,
         file_type_map=DEFAULT_FILE_TYPE_MAP,
     )
 
@@ -68,6 +82,7 @@ def test_parquet_directory_summary_combines_numeric_date_and_type_metrics():
     assert combined.total_size == 18
     assert combined.max_file_size == 11
     assert combined.latest_modified_ms == 1_700_000_000_000
+    assert combined.max_file_depth == 3
     assert combined.file_types == frozenset({"图片", "其他"})
 
 
@@ -76,12 +91,12 @@ def test_parquet_directory_summary_rejects_combining_different_paths():
 
     left = summary_for_object(
         ObjectRow("a/file.jpg", 1, None),
-        max_depth=4,
+        aggregation_depth=4,
         file_type_map=DEFAULT_FILE_TYPE_MAP,
     )
     right = summary_for_object(
         ObjectRow("b/file.jpg", 1, None),
-        max_depth=4,
+        aggregation_depth=4,
         file_type_map=DEFAULT_FILE_TYPE_MAP,
     )
 
@@ -94,7 +109,7 @@ def test_summary_for_object_ignores_timestamp_outside_supported_utc_range():
 
     summary = summary_for_object(
         ObjectRow("a/file.jpg", 1, 10**30),
-        max_depth=4,
+        aggregation_depth=4,
         file_type_map=DEFAULT_FILE_TYPE_MAP,
     )
 
@@ -106,6 +121,7 @@ def _aggregate(
     output_dir: Path,
     *,
     scan_started_ms: int = 1_700_000_000_000,
+    aggregation_depth: int = 4,
     max_directories_in_memory: int = 100_000,
 ):
     from obs_scan_platform.parquet_aggregation import aggregate_bucket_parquet
@@ -117,7 +133,7 @@ def _aggregate(
         temp_dir=temp_dir,
         output_dir=output_dir,
         scan_started_ms=scan_started_ms,
-        max_depth=4,
+        aggregation_depth=aggregation_depth,
         file_type_map=DEFAULT_FILE_TYPE_MAP,
         max_directories_in_memory=max_directories_in_memory,
         keep_temp_files=False,
@@ -180,7 +196,7 @@ def test_aggregate_bucket_parquet_writes_exact_sorted_snappy_schema(tmp_path: Pa
             "total_size": 18,
             "max_file_size": 11,
             "last_modified": "2023-11-14",
-            "max_depth": 4,
+            "max_depth": 5,
             "file_types": '["其他","图片"]',
         },
     ]
@@ -232,6 +248,45 @@ def test_aggregate_bucket_parquet_splits_after_50000_rows(tmp_path: Path):
     assert [pq.read_table(path).num_rows for path in parts] == [50_000, 1]
 
 
+def test_aggregate_bucket_parquet_preserves_deepest_original_depth_across_merge_runs(
+    tmp_path: Path,
+):
+    temp_dir = tmp_path / "_tmp"
+    append_object_rows(
+        temp_dir / "source-a.csv",
+        [ObjectRow("a/b/c/d/direct.jpg", 1, None)],
+    )
+    append_object_rows(
+        temp_dir / "source-b.csv",
+        [ObjectRow("a/b/c/d/e/file.jpg", 2, None)],
+    )
+    append_object_rows(
+        temp_dir / "source-c.csv",
+        [ObjectRow("a/b/c/d/e/f/g/deep.jpg", 3, None)],
+    )
+
+    parts = _aggregate(
+        temp_dir,
+        tmp_path / "bucket-a",
+        max_directories_in_memory=1,
+    )
+
+    assert pq.read_table(parts[0]).to_pylist() == [
+        {
+            "bucket_id": "bucket-id",
+            "bucket_name": "bucket-a",
+            "appid": "app.one",
+            "path": "/a/b/c/d/",
+            "object_count": 3,
+            "total_size": 6,
+            "max_file_size": 3,
+            "last_modified": "2023-11-14",
+            "max_depth": 7,
+            "file_types": '["图片"]',
+        }
+    ]
+
+
 def test_aggregate_bucket_parquet_failure_preserves_existing_output_and_removes_staging(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -278,7 +333,7 @@ def test_aggregate_bucket_parquet_rejects_zero_directory_limit(tmp_path: Path):
             temp_dir=tmp_path / "_tmp",
             output_dir=tmp_path / "bucket-a",
             scan_started_ms=0,
-            max_depth=4,
+            aggregation_depth=4,
             file_type_map=DEFAULT_FILE_TYPE_MAP,
             max_directories_in_memory=0,
             keep_temp_files=False,

@@ -15,7 +15,7 @@ import pyarrow.parquet as pq
 from obs_scan_platform.csv_store import iter_object_csv
 from obs_scan_platform.external_aggregation import MERGE_FAN_IN, iter_top_level_csv_files
 from obs_scan_platform.models import ObjectRow
-from obs_scan_platform.paths import depth_for_directory, normalize_object_key
+from obs_scan_platform.paths import normalize_object_key
 
 
 INTERNAL_SUMMARY_FIELDS = [
@@ -24,6 +24,7 @@ INTERNAL_SUMMARY_FIELDS = [
     "total_size",
     "max_file_size",
     "latest_modified_ms",
+    "max_file_depth",
     "file_types",
 ]
 PARQUET_SCHEMA = pa.schema(
@@ -50,6 +51,7 @@ class ParquetDirectorySummary:
     total_size: int
     max_file_size: int
     latest_modified_ms: int | None
+    max_file_depth: int
     file_types: frozenset[str]
 
     def combine(self, other: "ParquetDirectorySummary") -> "ParquetDirectorySummary":
@@ -66,14 +68,22 @@ class ParquetDirectorySummary:
             total_size=self.total_size + other.total_size,
             max_file_size=max(self.max_file_size, other.max_file_size),
             latest_modified_ms=max(timestamps) if timestamps else None,
+            max_file_depth=max(self.max_file_depth, other.max_file_depth),
             file_types=self.file_types | other.file_types,
         )
 
 
-def attributed_directory_path(object_key: str, max_depth: int) -> str:
+def _directory_parts_for_object(object_key: str) -> list[str]:
     normalized = normalize_object_key(object_key)
-    directory_parts = [part for part in normalized.split("/")[:-1] if part]
-    attributed_parts = directory_parts[:max_depth]
+    return [part for part in normalized.split("/")[:-1] if part]
+
+
+def file_directory_depth(object_key: str) -> int:
+    return len(_directory_parts_for_object(object_key))
+
+
+def attributed_directory_path(object_key: str, aggregation_depth: int) -> str:
+    attributed_parts = _directory_parts_for_object(object_key)[:aggregation_depth]
     if not attributed_parts:
         return "/"
     return "/" + "/".join(attributed_parts) + "/"
@@ -88,7 +98,7 @@ def file_type_for_object(object_key: str, file_type_map: dict[str, str]) -> str:
 def summary_for_object(
     row: ObjectRow,
     *,
-    max_depth: int,
+    aggregation_depth: int,
     file_type_map: dict[str, str],
 ) -> ParquetDirectorySummary:
     latest_modified_ms = row.last_modified_ms
@@ -98,11 +108,12 @@ def summary_for_object(
         except (OverflowError, OSError, ValueError):
             latest_modified_ms = None
     return ParquetDirectorySummary(
-        path=attributed_directory_path(row.object_key, max_depth),
+        path=attributed_directory_path(row.object_key, aggregation_depth),
         object_count=1,
         total_size=row.size_bytes,
         max_file_size=row.size_bytes,
         latest_modified_ms=latest_modified_ms,
+        max_file_depth=file_directory_depth(row.object_key),
         file_types=frozenset({file_type_for_object(row.object_key, file_type_map)}),
     )
 
@@ -130,6 +141,7 @@ def _write_summary_rows_atomic(path: Path, rows: Iterable[ParquetDirectorySummar
                         row.total_size,
                         row.max_file_size,
                         "" if row.latest_modified_ms is None else row.latest_modified_ms,
+                        row.max_file_depth,
                         _file_types_json(row.file_types),
                     ]
                 )
@@ -147,7 +159,7 @@ def _iter_summary_rows(path: Path) -> Iterator[ParquetDirectorySummary]:
         for values in reader:
             if len(values) != len(INTERNAL_SUMMARY_FIELDS):
                 raise ValueError(f"unexpected parquet summary CSV row in {path}")
-            file_types = json.loads(values[5])
+            file_types = json.loads(values[6])
             if not isinstance(file_types, list) or not all(
                 isinstance(file_type, str) for file_type in file_types
             ):
@@ -158,6 +170,7 @@ def _iter_summary_rows(path: Path) -> Iterator[ParquetDirectorySummary]:
                 total_size=int(values[2]),
                 max_file_size=int(values[3]),
                 latest_modified_ms=None if values[4] == "" else int(values[4]),
+                max_file_depth=int(values[5]),
                 file_types=frozenset(file_types),
             )
 
@@ -272,7 +285,7 @@ def _summarize_objects(
     temp_dir: Path,
     aggregation_dir: Path,
     *,
-    max_depth: int,
+    aggregation_depth: int,
     file_type_map: dict[str, str],
     max_directories_in_memory: int,
     keep_intermediates: bool,
@@ -301,7 +314,11 @@ def _summarize_objects(
 
     for source in iter_top_level_csv_files(temp_dir):
         for row in iter_object_csv(source):
-            summary = summary_for_object(row, max_depth=max_depth, file_type_map=file_type_map)
+            summary = summary_for_object(
+                row,
+                aggregation_depth=aggregation_depth,
+                file_type_map=file_type_map,
+            )
             current = summaries.get(summary.path)
             summaries[summary.path] = summary if current is None else current.combine(summary)
             if len(summaries) >= max_directories_in_memory:
@@ -332,7 +349,7 @@ def _parquet_row(
             if summary.latest_modified_ms is None
             else _date_from_ms(summary.latest_modified_ms)
         ),
-        "max_depth": depth_for_directory(summary.path),
+        "max_depth": summary.max_file_depth,
         "file_types": _file_types_json(summary.file_types),
     }
 
@@ -410,7 +427,7 @@ def aggregate_bucket_parquet(
     temp_dir: Path,
     output_dir: Path,
     scan_started_ms: int,
-    max_depth: int,
+    aggregation_depth: int,
     file_type_map: dict[str, str],
     max_directories_in_memory: int,
     keep_temp_files: bool,
@@ -425,7 +442,7 @@ def aggregate_bucket_parquet(
     reduced = _summarize_objects(
         temp_dir,
         aggregation_dir,
-        max_depth=max_depth,
+        aggregation_depth=aggregation_depth,
         file_type_map=file_type_map,
         max_directories_in_memory=max_directories_in_memory,
         keep_intermediates=keep_temp_files,
