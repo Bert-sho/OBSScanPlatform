@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-`2026-07-30 11:49:00 +08:00` (Asia/Shanghai)
+`2026-07-30 16:32:39 +08:00` (Asia/Shanghai)
 
 ## Machine/environment
 
@@ -18,122 +18,139 @@
 
 ## Latest commit before this session
 
-`fcb57b9` — `docs: finalize aggregation barrier handoff`
+`576e9df` — `docs: record parquet depth semantics push`
 
 ## Latest commits after this session
 
-- `58a564d` — `docs: design parquet maximum depth semantics`
-- `d5071dc` — `docs: plan parquet maximum depth semantics`
-- `39c1b70` — `feat: rename parquet aggregation depth setting`
-- `06d0440` — `fix: report deepest file level in parquet`
-- `b6a19b8` — `fix: pass canonical parquet aggregation depth`
-- `62b0b5c` — `docs: distinguish aggregation and file depth`
-- `45588ef` — `docs: finalize parquet depth semantics handoff`
-- The final handoff commit is the commit containing the latest version of this
-  file; resolve its exact hash with `git log -1 --oneline` after fetching.
+- `d85559f` — `docs: design comprehensive project guide`
+- `ba8c226` — `docs: plan comprehensive project guide`
+- `6631bc3` — `docs: add comprehensive project guide`
+- `7ec1705` — `docs: clarify project guide concurrency limits`
+- `334ae93` — `docs: document project security boundaries`
+- The final handoff commit is created after this snapshot; resolve its exact
+  hash with `git log -1 --oneline` after fetching.
 
 ## Summary of what changed
 
-- Replaced the canonical global cutoff field with
-  `ScanSettings.aggregation_depth`, default 4 and non-negative.
-- Legacy raw input `max_depth` migrates to the canonical field only when used
-  alone. Dual-name configuration fails before field validation. Serialization
-  and `/config/apps` contain only `aggregation_depth`.
-- Calculated each object's original containing-directory depth before cutoff
-  attribution and carried the maximum through the existing bounded external
-  summary pipeline.
-- Extended internal Parquet summary CSV rows with `max_file_depth`; final
-  Parquet still uses the exact `max_depth int32 non-null` schema field.
-- Updated scanner wiring and active operator documentation without changing
-  CSV behavior, request/aggregation coordination, output layout, or APIs.
+- Created `docs/project-guide.md`, a Chinese, fully self-contained guide for
+  operators and maintainers that is independent of both README files.
+- Covered positioning, supported features, declared dependency floors,
+  installation, complete YAML, CLI, API, concurrency, architecture, every
+  source module, CSV/Parquet contracts, result layout, Manifest/log behavior,
+  failure semantics, security, troubleshooting, development, testing,
+  extension points, limitations, and operations.
+- Included an executable safe YAML block containing every current scan model
+  field and exact defaults, the 26-entry built-in type map, global thresholds,
+  all application fields, and complete bucket overrides.
+- Included two Mermaid diagrams: the end-to-end scan sequence and component
+  architecture/data flow.
+- Added the approved design and execution plan. The plan was corrected after
+  source inspection because `python -m obs_scan_platform.cli` does not invoke
+  `main`; the installed `obs-scan` console script is the real entry point.
+- Did not modify README files, configuration examples, runtime code, or tests.
 
 ## Important decisions and rationale
 
-- File depth excludes the filename: `/a/b/file.txt` is 2 and
-  `/a/b/c/d/e/file.txt` is 5.
-- `aggregation_depth` controls only the output path cutoff. A row at
-  `/a/b/c/d/` may have `max_depth` 5, 7, or higher when it aggregates deeper
-  files.
-- Both configuration names are rejected even when equal, preventing ambiguous
-  ownership during future edits.
-- The legacy name is a raw-input compatibility migration, not a Pydantic alias
-  or model field, so all responses and dumps are canonical.
-- The new depth travels with existing chunk/merge summaries instead of causing
-  a second detail-file scan or a new grouping stage.
-- Historical 2026-07-29 design/plan files remain unchanged; the 2026-07-30
-  design supersedes their depth semantics.
+- A layered single-document structure serves both operator and developer
+  reading paths without duplicating facts across separate guides.
+- Examples are fully copyable but use only localhost and `.invalid` hosts plus
+  an explicit fake token placeholder.
+- Model defaults, source constants, and routes were introspected during
+  validation instead of manually assuming the documentation stayed aligned.
+- `aggregation_depth` is the only active name in the new YAML; legacy
+  `max_depth` appears only in the compatibility explanation, while output
+  `max_depth` is documented separately as deepest original file-directory
+  level.
+- The guide explicitly differentiates legacy CSV ancestor rollup from Parquet
+  single-directory attribution and cutoff accumulation.
+- Current security gaps are documented rather than hidden: detailed request
+  failures may expose query/body data, API has no auth, CSV lacks Manifest
+  membership checks, and run detail does not independently reject a symlinked
+  Manifest.
+- Repository task status remains `wip` because a full suite with any failures
+  cannot be marked completed, even though all guide-specific checks passed.
 
 ## Failed attempts or rejected approaches
 
-- Pre-task baseline: `268 passed, 5 failed, 1 skipped`; the five failures were
-  documented rather than altered.
-- Task 1 RED: `7 failed, 1 passed`; failures proved the canonical field,
-  migration, conflict handling, and API serialization were absent. GREEN:
-  focused `8 passed`, then config `39 passed` and config API `2 passed`.
-- Task 2 RED: `14 failed, 10 passed`; failures proved the new depth function,
-  summary state, cutoff argument, and merge semantics were absent. GREEN:
-  Parquet `24 passed` and legacy CSV aggregation `41 passed`.
-- Task 3 RED: two scanner tests failed because scanner still read removed
-  `scan.max_depth`. Replacing the single aggregator keyword produced focused
-  `2 passed` and scanner/end-to-end `103 passed`.
-- A second full detail scan and depth-encoded grouping keys were rejected as
-  slower or more complex than carrying one integer in the existing summary.
-- No unrelated Windows test fix or historical-spec rewrite was attempted.
+- A planned CLI probe using `python -m obs_scan_platform.cli` produced no CLI
+  because the module has no `if __name__ == "__main__"` invocation. The plan
+  and guide were corrected to use `obs-scan`.
+- An early validation assertion expected 28 built-in file types; introspection
+  showed the exact source map has 26 entries. The validator was corrected; the
+  guide YAML already matched the source exactly.
+- The broader planned CLI/config/API check still included
+  `test_scan_success_path` and therefore returned one known Windows slash
+  failure (`64 passed, 1 failed, 1 skipped, 4 deselected`). A second fresh run
+  excluding the exact five established portability cases passed all remaining
+  `278` tests.
+- A dedicated Mermaid renderer was not added because it would expand the
+  documentation-only task and the repository has no such dependency. Fence
+  count, block count, content, and surrounding Markdown were validated.
+- Splitting operator and developer content into two files was rejected by the
+  user in favor of the approved layered single-guide approach.
 
 ## Review status
 
-- Local review covered the full `fcb57b9..62b0b5c` task range because subagent
-  delegation was not authorized.
-- Configuration migration order, dual-name validation, canonical
-  serialization, internal CSV indices, `max()` combination, Parquet schema,
-  scanner coordination placement, documentation, and secret scope were
-  checked.
+- `superpowers:requesting-code-review` was invoked. Collaboration rules did
+  not authorize a reviewer subagent, so review was performed locally over
+  `576e9df..334ae93` using the skill's review checklist.
+- Review checked plan/spec alignment, both audiences, self-containment, source
+  facts, configuration completeness, CLI/API behavior, output fields,
+  concurrency, security boundaries, relative links, placeholders, README
+  isolation, and unsupported-feature claims.
+- Review findings about unknown YAML keys, internal `source_path`, CSV time
+  wording, HTTPX pool limits, request error fields, CSV whitelist behavior, and
+  Manifest symlink behavior were corrected and revalidated.
 - No Critical or Important issue remains.
 
 ## Current test/build status
 
-Fresh completion verification:
+Fresh task verification:
 
 ```powershell
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_parquet_aggregation.py tests/test_aggregation.py tests/test_external_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
-# 207 passed in 5.61s
+& '.superpowers\sdd\.venv\Scripts\obs-scan.exe' --help
+& '.superpowers\sdd\.venv\Scripts\obs-scan.exe' scan --help
+# both exit 0; command and scan options match the guide
 
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_api.py -k "config_apps or parquet" -q
-# 9 passed, 1 skipped, 18 deselected, 1 warning in 1.10s
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_cli.py tests/test_api.py -k "health or config_apps or post_runs or parquet" -q
+# 14 passed, 1 skipped, 16 deselected, 1 warning in 1.18s
+
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q -k "not test_runs_list_ignores_symlinked_external_run and not test_runs_list_ignores_symlinked_external_manifest and not test_bucket_csv_downloads_file and not test_run_detail_rejects_backslash_segment and not test_scan_success_path"
+# 278 passed, 1 skipped, 5 deselected, 1 warning in 5.78s
+
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
+# 278 passed, 5 failed, 1 skipped, 1 warning in 7.76s
 
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
 # exit 0
-
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
-# 278 passed, 5 failed, 1 skipped, 1 warning in 7.18s
 
 git diff --check
 # exit 0
 ```
 
-The five failures exactly match the baseline: two Windows symlink privilege
-failures, CSV response CRLF normalization, Windows backslash path semantics,
-and CLI path-separator rendering. No focused task failure remains. Repository
-policy therefore keeps `docs/current-task.md` at `wip`.
+The five full-suite failures exactly match the baseline: two symlink creation
+privilege failures, CSV response CRLF normalization, Windows backslash path
+semantics, and CLI path-separator rendering. No documentation-specific or
+non-baseline test fails.
+
+The standalone guide validator reported:
+
+```text
+PASS headings=15 mermaid=2 yaml_blocks=2 links=21 scan_fields=20
+file_types=26 csv_fields=17 parquet_fields=10 routes=8
+```
 
 ## Push status
 
-`git push -u origin HEAD` succeeded for `codex/parquet-overview` through
-`45588ef`:
-
-```text
-fcb57b9..45588ef  HEAD -> codex/parquet-overview
-```
-
-The final documentation commit containing this push record is pushed
-immediately after creation, followed by an explicit local/remote HEAD equality
-check.
+Not yet pushed at this snapshot. The next actions are the mandatory handoff
+commit, `git push -u origin HEAD`, a push-result record, a final push, and an
+explicit local/remote HEAD equality check.
 
 ## Uncommitted changes, if any
 
-At this push-result snapshot only `docs/current-task.md` and `docs/handoff.md`
-are uncommitted. They are committed and pushed as the final follow-up action.
-Expected final working tree state: clean.
+At this snapshot `docs/current-task.md` and `docs/handoff.md` contain the new
+task records and are uncommitted. Expected final state after the steps below:
+clean working tree, local HEAD equal to `origin/codex/parquet-overview`.
 
 ## Exact resume instructions for the next Codex session
 
@@ -143,12 +160,12 @@ git fetch origin
 git switch codex/parquet-overview
 git pull --ff-only
 git status --short --branch
-git log -10 --oneline
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_parquet_aggregation.py tests/test_aggregation.py tests/test_external_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_api.py -k "config_apps or parquet" -q
+git log -8 --oneline
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q -k "not test_runs_list_ignores_symlinked_external_run and not test_runs_list_ignores_symlinked_external_manifest and not test_bucket_csv_downloads_file and not test_run_detail_rejects_backslash_segment and not test_scan_success_path"
 ```
 
-Confirm local HEAD equals `origin/codex/parquet-overview` and the tree is
-clean. For operational validation, configure `aggregation_depth`, run a real
-Parquet scan, and check that cutoff rows preserve the deepest original file
-level. Handle the five Windows baseline failures only in a separate task.
+Confirm the working tree is clean and local HEAD equals
+`origin/codex/parquet-overview`. Use `docs/project-guide.md` for project
+onboarding and operation. For live validation, run a small representative OBS
+scan and compare Manifest, CSV, and Parquet semantics with sections 11–13.
+Treat the five Windows portability failures as a separate task.

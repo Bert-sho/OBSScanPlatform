@@ -2,7 +2,7 @@
 
 ## Current task title
 
-Correct Parquet maximum file depth and rename aggregation cutoff configuration
+Create a fully self-contained OBS Scan Platform project guide
 
 ## Current branch
 
@@ -12,109 +12,123 @@ Correct Parquet maximum file depth and rename aggregation cutoff configuration
 
 `wip`
 
-The requested implementation, documentation, review, and focused verification
+The requested standalone guide, review, and documentation-specific validation
 are complete. Repository policy keeps the task at `wip` because the full
-Windows suite still contains the same five pre-existing portability failures.
+Windows test suite still contains the same five pre-existing portability
+failures.
 
 ## User goal
 
-- Make Parquet `max_depth` report the deepest original containing-directory
-  level represented by each row. The filename is excluded, so
-  `/a/b/file.txt` is depth 2 and `/a/b/c/d/e/file.txt` is depth 5.
-- Rename the canonical global YAML cutoff setting from `max_depth` to
-  `aggregation_depth`.
-- Accept legacy `max_depth` only when the canonical name is absent; reject both
-  names together and serialize only `aggregation_depth`.
+- Create a Markdown project guide independent of `README.md`.
+- Serve both operators/users and developers/maintainers.
+- Make the guide fully self-contained, in Chinese with English technical names.
+- Cover architecture, technology stack, supported features, complete usage,
+  configuration, CLI/API, output formats, aggregation semantics, operations,
+  troubleshooting, security, development, testing, extension points, and
+  current limitations.
+- Continue autonomously through validation, commit, and push.
 
 ## Completed work
 
-- Added canonical `scan.aggregation_depth`, non-negative with default `4`.
-- Added before-validation migration for legacy `scan.max_depth` and an explicit
-  error when both names are present, including equal values.
-- Ensured model dumps and `GET /config/apps` expose only
-  `aggregation_depth`.
-- Added original file-directory depth calculation before output-path
-  truncation.
-- Added `max_file_depth` to the bounded Parquet summary state and internal CSV
-  format; every chunk and merge round combines it with `max()`.
-- Changed the unchanged Parquet `max_depth int32` column to use the aggregated
-  deepest original file depth instead of the output path depth.
-- Renamed Parquet-specific cutoff parameters to `aggregation_depth` and updated
-  scanner dispatch without changing its run-local aggregation coordinator.
-- Preserved CSV aggregation, all other Parquet metrics, Snappy compression,
-  50,000-row splitting, schema order/nullability, empty-bucket behavior,
-  output publication, manifests, and downloads.
-- Added RED→GREEN tests for canonical/legacy configuration, conflict and
-  negative validation, API serialization, direct/root/deep file depth, bounded
-  merge propagation, and scanner wiring.
-- Updated example YAML, English/Chinese README files, scan-start guide,
-  architecture notes, approved design, and implementation plan.
-- Completed a local whole-branch review with no remaining Critical or Important
-  finding.
-- Pushed `codex/parquet-overview` to GitHub through `45588ef`; the final
-  push-status record is committed and pushed as the last delivery action.
+- Added `docs/project-guide.md` with 15 layered sections and separate reading
+  paths for operators and developers.
+- Added complete Windows and Linux/macOS setup, CLI, API startup, request, and
+  download examples without depending on either README.
+- Included a model-validated YAML example with all 20 `ScanSettings` fields,
+  all threshold/application/bucket fields, the exact 26-entry built-in file
+  type map, default Parquet output, and canonical `aggregation_depth: 4`.
+- Documented legacy `max_depth` input compatibility and conflict behavior,
+  while distinguishing it from Parquet output `max_depth`.
+- Documented all 8 application routes, CLI options/exit behavior, output tree,
+  Manifest fields, logs, temporary files, status rollup, retry behavior, and
+  current process-local constraints.
+- Added one Mermaid scan sequence and one Mermaid component architecture
+  diagram.
+- Listed all 15 modules under `src/obs_scan_platform` with working relative
+  source links and responsibilities.
+- Listed the exact 17-column CSV output and exact 10-column non-null Parquet
+  schema, including Snappy, 50,000-row splitting, empty part, duplicates,
+  cutoff attribution, deepest original directory depth, file type JSON, UTC
+  fallback date, bounded merge, and atomic publication.
+- Documented security boundaries without overstating them: masked config
+  tokens, sensitive failure logs/Manifest details, unauthenticated API,
+  path/name risks, strict Parquet whitelist behavior, non-whitelisted CSV
+  download, and the run-detail Manifest symlink limitation.
+- Added the approved design and implementation plan; corrected the plan's CLI
+  probe to use the real installed `obs-scan` entry point.
+- Kept `README.md`, `README.zh-CN.md`, runtime source, tests, and example YAML
+  unchanged.
+- Completed a local whole-task review from `576e9df` through `334ae93`; no
+  Critical or Important finding remains.
 
 ## Remaining work
 
-- No requested implementation or review work remains.
+- Commit and push the mandatory handoff records, then record and push the
+  resulting remote state.
+- No requested guide content or review work remains.
 - Run a representative live OBS scan when an environment is available.
 - Address the five unrelated Windows portability failures in a separate task.
 
 ## Key files changed
 
-- `src/obs_scan_platform/config.py`
-- `src/obs_scan_platform/parquet_aggregation.py`
-- `src/obs_scan_platform/scanner.py`
-- `tests/test_config.py`
-- `tests/test_api.py`
-- `tests/test_parquet_aggregation.py`
-- `tests/test_scanner.py`
-- `config/apps.example.yaml`
-- `README.md`
-- `README.zh-CN.md`
-- `docs/scan-start-guide.md`
-- `CLAUDE.md`
-- `docs/superpowers/specs/2026-07-30-parquet-max-depth-semantics-design.md`
-- `docs/superpowers/plans/2026-07-30-parquet-max-depth-semantics.md`
+- `docs/project-guide.md`
+- `docs/superpowers/specs/2026-07-30-project-guide-design.md`
+- `docs/superpowers/plans/2026-07-30-project-guide.md`
 - `docs/current-task.md`
 - `docs/handoff.md`
 
 ## Validation commands run
 
 ```powershell
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_parquet_aggregation.py tests/test_aggregation.py tests/test_external_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_api.py -k "config_apps or parquet" -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
+& '.superpowers\sdd\.venv\Scripts\obs-scan.exe' --help
+& '.superpowers\sdd\.venv\Scripts\obs-scan.exe' scan --help
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_cli.py tests/test_api.py -k "health or config_apps or post_runs or parquet" -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_cli.py tests/test_config.py tests/test_api.py -k "not runs_list_ignores_symlinked_external and not bucket_csv_downloads_file and not run_detail_rejects_backslash_segment" -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q -k "not test_runs_list_ignores_symlinked_external_run and not test_runs_list_ignores_symlinked_external_manifest and not test_bucket_csv_downloads_file and not test_run_detail_rejects_backslash_segment and not test_scan_success_path"
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
 git diff --check
 ```
 
+A Python guide validator also checked numbered headings, Mermaid/code-fence
+balance, both YAML blocks, exact model field coverage/defaults, the built-in
+file type map, repository example loading, CSV and Parquet fields, routes,
+local links, placeholder URLs, and secret patterns.
+
 ## Validation result
 
-- Fresh feature suite: `207 passed in 5.61s`.
-- Fresh configuration/Parquet API suite: `9 passed, 1 skipped, 18 deselected
-  in 1.10s`; the skip is the Windows symlink privilege case.
-- Fresh compile validation: exit `0`.
-- Fresh full suite: `278 passed, 5 failed, 1 skipped, 1 warning in 7.18s`.
-- The five failures exactly match the pre-task Windows baseline: two symlink
-  privilege failures, CSV CRLF response normalization, backslash path
-  semantics, and CLI path-separator rendering.
-- `git diff --check` passed and the working tree contained no uncommitted
-  implementation changes before this handoff update.
+- CLI root and scan help: exit `0`; documented command/options match output.
+- Focused CLI/API documentation tests: `14 passed, 1 skipped, 16 deselected,
+  1 warning in 1.18s`.
+- The broader planned CLI/config/API command: `64 passed, 1 failed, 1 skipped,
+  4 deselected, 1 warning in 1.55s`; the sole failure is the known Windows
+  `test_scan_success_path` slash expectation.
+- Full suite excluding the exact five known portability cases: `278 passed,
+  1 skipped, 5 deselected, 1 warning in 5.78s`.
+- Fresh full suite: `278 passed, 5 failed, 1 skipped, 1 warning in 7.76s`.
+- The five failures exactly match the pre-task baseline: two Windows symlink
+  privilege cases, CSV CRLF response normalization, backslash path semantics,
+  and CLI path-separator rendering.
+- Compile validation and `git diff --check`: exit `0`.
+- Guide contract validator: `15` headings, `2` Mermaid blocks, `2` YAML blocks,
+  `21` local links, `20` scan fields, `26` file types, `17` CSV fields, `10`
+  Parquet fields, and `8` routes; all assertions passed.
 
 ## Known risks
 
-- Existing Parquet consumers that incorrectly interpreted `max_depth` as the
-  output `path` depth will observe intentionally larger values at the cutoff.
-- The legacy YAML name remains accepted for compatibility but has no separate
-  deprecation deadline in this task.
-- No live OBS service was available; automated tests cover real configuration,
-  aggregation, PyArrow output, scanner, and API boundaries with controlled OBS
-  responses.
-- The five existing Windows portability failures remain outside this task.
+- The guide documents current behavior, including security and portability
+  limitations; future runtime changes can make it stale unless documentation
+  is updated with the same change.
+- Mermaid syntax was structurally checked but not rendered through a dedicated
+  Mermaid CLI because the repository does not include that tool.
+- No live OBS service was available for a production-scale example scan.
+- The result directory contains potentially sensitive detailed request errors
+  and must be protected; the built-in API remains unauthenticated.
+- The five existing Windows test failures remain outside this documentation
+  task.
 
 ## Next recommended action
 
-Use `aggregation_depth: 4` in new YAML configurations, run a representative
-Parquet scan, and confirm cutoff rows report the deepest original file level.
-Treat Windows portability cleanup as a separate task.
+Publish the branch, then use `docs/project-guide.md` as the primary standalone
+operator/developer guide. Validate it alongside a representative real OBS scan
+and handle Windows portability cleanup as a separate task.
