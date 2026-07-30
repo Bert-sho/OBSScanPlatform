@@ -220,6 +220,8 @@ applications:
 | `defaults` | object，默认见下表 | 所有桶的默认阈值和 filelist 深度 |
 | `applications` | array，默认空 | 应用列表 |
 
+`AppConfigFile.source_path` 是 `load_config()` 在读取后写入的内部字段，用于 Manifest 记录配置来源，不应配置在 YAML 中。当前模型没有启用 `extra="forbid"`，未知 YAML key 可能被忽略；修改配置后应通过加载检查或 `GET /config/apps` 核对实际生效字段，不能只依赖 YAML 成功解析。
+
 ### 6.3 `scan` 字段
 
 | 字段 | 默认值 | 说明 |
@@ -546,7 +548,7 @@ CSV 保持历史规则。对象 `/a/b/file.txt` 同时累计到 `/a/b/`、`/a/` 
 | `max_file_size_bytes` | 累计范围内最大文件字节数 |
 | `empty_file_count` | 大小为 0 的文件数 |
 | `large_file_count` | 大小 `>= large_file_bytes` 的文件数 |
-| `latest_modified_ms` | 最大有效修改时间，Unix 毫秒；全部缺失时为空 |
+| `latest_modified_ms` | 最大可解析整数修改时间，Unix 毫秒；全部缺失时为空 |
 | `inactive_days` | `max(0, (scan_started_ms - latest_modified_ms) // 86400000)`；时间缺失时为空 |
 | `is_large_directory` | `total_size_bytes >= large_directory_bytes`，小写 `true/false` |
 | `has_large_file` | `large_file_count > 0`，小写 `true/false` |
@@ -662,7 +664,7 @@ results/
 - 桶身份和状态：`bucket_name`、`bucket_id`、`status`；
 - 输出：兼容字段 `csv_path`、`overview_format`、`overview_path`、`overview_files`；
 - 当前生效阈值 `thresholds`；
-- `error`、完整 `errors` 和有部分错误时的 `partial_errors`；
+- `error`、请求失败明细 `errors` 和有部分错误时的 `partial_errors`；
 - 毫秒/ISO UTC 起止时间及 `elapsed_seconds`、`request_elapsed_seconds`、`processing_elapsed_seconds`；
 - `keep_temp_files: true` 时的 `temp_dir`。
 
@@ -691,8 +693,9 @@ OBSClient 对网络异常、HTTP 408/429/5xx、无效 JSON 和带失败原因的
 ### 13.2 安全边界
 
 - `GET /config/apps` 将每个 `apptoken` 替换为 `******`。
-- API 拒绝 `.`, `..`、含 `/` 或 `\` 的路径段，并确保解析后的文件仍位于结果根目录内。
+- API 的安全路径 helper 拒绝 `.`, `..`、含 `/` 或 `\` 的路径段，并确保它解析的 child 仍位于结果根目录内；但运行详情随后读取的 `manifest.json` 没有独立的符号链接 containment 检查，因此结果目录不能交给不可信用户写入。
 - `/runs` 忽略符号链接运行目录和符号链接 Manifest；Parquet 下载还要求 part 是 Manifest 成员、普通文件且不是符号链接。
+- CSV 下载只校验安全解析后的固定路径和文件存在性，不像 Parquet 那样要求文件出现在 Manifest 白名单中。
 - 部分失败摘要的 reason 和清理错误会把 URL 或 credential-like 查询文本替换为占位符。
 - 但请求失败的详细 `errors`、OBSClient 失败日志和最多 2,048 字符的响应体用于诊断，当前可能包含原始 URL、query token、requestbody 或上游返回的敏感内容。`manifest.json` 和 `scan.log` 必须与 YAML/token 一样按敏感数据保护。
 - 内置 API 没有认证、TLS、租户隔离或访问控制。应使用文件权限限制结果目录，并在 API 前放置受控网络、TLS 和认证代理。
@@ -703,7 +706,7 @@ OBSClient 对网络异常、HTTP 408/429/5xx、无效 JSON 和带失败原因的
 | 现象 | 常见原因 | 检查和处理 |
 | --- | --- | --- |
 | YAML 解析或 Pydantic 校验失败 | 缩进错误、格式类型错误、同时配置两个深度名、非法 overview 格式、空文件类型映射项 | 用 Python 加载配置；只保留 `aggregation_depth`；检查完整异常路径 |
-| 应用立即 `failed` | 最终 endpoint、`appid` 或 `apptoken` 为空 | 检查应用 endpoint 是否继承全局值，检查 token 注入方式 |
+| 应用立即 `failed` | 最终 endpoint、`appid` 或 `apptoken` 为空 | 检查应用 endpoint 是否继承全局值，检查配置生成或部署过程是否写入 token |
 | 运行 `success` 但没有应用/桶 | `--appid` 未命中、应用 disabled、桶缺字段、共享桶开关、桶 `enable: false` | 检查 Manifest 中 `applications`/`buckets` 数量和 `scan.log` skipped 记录 |
 | 桶 `partial_failed` | 部分 filelist、metadata 或 objectkeys 请求失败 | 查看 `partial_errors` 计数/样本及 `errors`；结果不可视为完整 |
 | 请求最终失败 | 网络错误、408/429/5xx、OBS 业务错误或无效 JSON 超过重试次数 | 查看 endpoint、attempts、status 和响应体；核对超时、重试和上游状态 |
@@ -795,6 +798,7 @@ pytest tests/test_parquet_aggregation.py -q
 - CSV 与 Parquet 的父子目录聚合规则不同，消费者不能假设两者只差存储格式。
 - 最终交付只有目录总览；对象级数据只存在于可选保留的临时 CSV，不提供稳定的对象明细 schema 或下载 API。
 - 文件路径来自 run ID、appid 和桶名；scanner 写入侧没有与读取 API 完全相同的路径段校验。
+- 下载端安全策略并不完全一致：Parquet 使用 Manifest 白名单和符号链接检查，CSV 不要求 Manifest 成员，运行详情也不会单独拒绝符号链接 Manifest。
 - 尚未在本文档任务中连接真实 OBS 环境做生产规模验证；自动化测试使用受控响应覆盖代码边界。
 - Windows 测试存在第 14 节所述的 5 个已知可移植性失败。
 
