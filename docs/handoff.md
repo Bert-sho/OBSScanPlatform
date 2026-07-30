@@ -2,12 +2,13 @@
 
 ## Timestamp
 
-`2026-07-29 20:58:38 +08:00` (Asia/Shanghai)
+`2026-07-30 11:49:00 +08:00` (Asia/Shanghai)
 
 ## Machine/environment
 
 - Workspace: `D:\code\OBSScanPlatform`
 - OS/shell: Windows PowerShell
+- Branch: `codex/parquet-overview`
 - Python validation environment: Git-ignored
   `.superpowers\sdd\.venv\Scripts\python.exe`
 
@@ -17,123 +18,128 @@
 
 ## Latest commit before this session
 
-`efc8bf9b9246d85cac6727a9187b306cfb3744d5` -
-`docs: record parquet overview push`
+`fcb57b9` — `docs: finalize aggregation barrier handoff`
 
-## Latest commit after this session
+## Latest commits after this session
 
-- Runtime/test tip:
-  `9a186f27084e499a8a8078c4193d25437358aedf` -
-  `fix: make aggregation coordination run-local`
-- Latest session commit after handoff commit: `HEAD`, the documentation-only
-  commit containing this file. Its self-referential hash cannot be embedded in
-  its own contents; inspect `git log -1 --oneline`.
+- `58a564d` — `docs: design parquet maximum depth semantics`
+- `d5071dc` — `docs: plan parquet maximum depth semantics`
+- `39c1b70` — `feat: rename parquet aggregation depth setting`
+- `06d0440` — `fix: report deepest file level in parquet`
+- `b6a19b8` — `fix: pass canonical parquet aggregation depth`
+- `62b0b5c` — `docs: distinguish aggregation and file depth`
+- The final handoff commit is the commit containing the latest version of this
+  file; resolve its exact hash with `git log -1 --oneline` after fetching.
 
 ## Summary of what changed
 
-- Added `ScanPhaseCoordinator`, a compact writer-preferred async phase gate.
-- Each `Scanner.run` creates one coordinator and passes it explicitly to all
-  application clients, buckets, and CSV/Parquet aggregation branches.
-- Waiting aggregations close new request/retry admission. Active attempts drain
-  through request construction, send, response/status/business validation, and
-  JSON parsing. Callers synchronously consume the payload before their next
-  await, after which queued aggregations run one at a time and consecutively.
-- Paused requests resume after the writer queue drains; error and cancellation
-  paths release all coordinator state.
-- Added unit and real-coordinator Scanner integration coverage, plus operator
-  documentation. No YAML option or cross-process coordination was introduced.
+- Replaced the canonical global cutoff field with
+  `ScanSettings.aggregation_depth`, default 4 and non-negative.
+- Legacy raw input `max_depth` migrates to the canonical field only when used
+  alone. Dual-name configuration fails before field validation. Serialization
+  and `/config/apps` contain only `aggregation_depth`.
+- Calculated each object's original containing-directory depth before cutoff
+  attribution and carried the maximum through the existing bounded external
+  summary pipeline.
+- Extended internal Parquet summary CSV rows with `max_file_depth`; final
+  Parquet still uses the exact `max_depth int32 non-null` schema field.
+- Updated scanner wiring and active operator documentation without changing
+  CSV behavior, request/aggregation coordination, output layout, or APIs.
 
 ## Important decisions and rationale
 
-- Coordinator ownership is per `run`, not per reusable `Scanner`, so
-  concurrent runs cannot share capacity or gating state.
-- The coordinator owns the request semaphore so admission and capacity cannot
-  be acquired in conflicting orders.
-- Writer preference is intentional: once a writer waits, late readers and
-  retries remain paused until the complete queued writer batch ends.
-- Aggregation remains synchronous on the event-loop thread after reader drain,
-  which guarantees current synchronous page/CSV processing has completed.
-- HTTPX connection limits, 5-second keep-alive expiry, timeouts, retry/backoff,
-  bucket concurrency, pagination, payloads, outputs, and partial-failure
-  behavior were preserved.
+- File depth excludes the filename: `/a/b/file.txt` is 2 and
+  `/a/b/c/d/e/file.txt` is 5.
+- `aggregation_depth` controls only the output path cutoff. A row at
+  `/a/b/c/d/` may have `max_depth` 5, 7, or higher when it aggregates deeper
+  files.
+- Both configuration names are rejected even when equal, preventing ambiguous
+  ownership during future edits.
+- The legacy name is a raw-input compatibility migration, not a Pydantic alias
+  or model field, so all responses and dumps are canonical.
+- The new depth travels with existing chunk/merge summaries instead of causing
+  a second detail-file scan or a new grouping stage.
+- Historical 2026-07-29 design/plan files remain unchanged; the 2026-07-30
+  design supersedes their depth semantics.
 
 ## Failed attempts or rejected approaches
 
-- The pre-task and final full suites both produced the same five Windows-only
-  failures; they were documented rather than altered or suppressed.
-- During Task 2, Scanner still used the removed `request_semaphore` constructor
-  argument, causing an event-based test to wait forever. Exact task-owned pytest
-  processes were stopped, the call site was migrated to the coordinator, and
-  the focused suite then passed.
-- The first request-order RED fixture exercised a business-reason helper twice;
-  the fixture was corrected before changing production code.
-- Final review found Scanner-level rather than run-level ownership and missing
-  composed integration coverage. One unified fix wave addressed both Important
-  and both Minor findings; the single scoped re-review returned PASS.
-- SDD scratch cleanup attempted only the verified plan-specific path but was
-  rejected by local policy. No bypass was attempted; the directory remains
-  ignored and untracked.
+- Pre-task baseline: `268 passed, 5 failed, 1 skipped`; the five failures were
+  documented rather than altered.
+- Task 1 RED: `7 failed, 1 passed`; failures proved the canonical field,
+  migration, conflict handling, and API serialization were absent. GREEN:
+  focused `8 passed`, then config `39 passed` and config API `2 passed`.
+- Task 2 RED: `14 failed, 10 passed`; failures proved the new depth function,
+  summary state, cutoff argument, and merge semantics were absent. GREEN:
+  Parquet `24 passed` and legacy CSV aggregation `41 passed`.
+- Task 3 RED: two scanner tests failed because scanner still read removed
+  `scan.max_depth`. Replacing the single aggregator keyword produced focused
+  `2 passed` and scanner/end-to-end `103 passed`.
+- A second full detail scan and depth-encoded grouping keys were rejected as
+  slower or more complex than carrying one integer in the existing summary.
+- No unrelated Windows test fix or historical-spec rewrite was attempted.
 
-## Current review status
+## Review status
 
-- Task 1, Task 2, and Task 3 task-scoped reviews passed.
-- The first whole-branch review returned two Important and two Minor findings.
-- Commit `9a186f2` addressed all four findings.
-- The required single scoped re-review returned PASS with no new Critical,
-  Important, or Minor breakage.
-- No tracked task-specific SDD scratch artifact or secret is present.
+- Local review covered the full `fcb57b9..62b0b5c` task range because subagent
+  delegation was not authorized.
+- Configuration migration order, dual-name validation, canonical
+  serialization, internal CSV indices, `max()` combination, Parquet schema,
+  scanner coordination placement, documentation, and secret scope were
+  checked.
+- No Critical or Important issue remains.
 
 ## Current test/build status
 
+Fresh completion verification:
+
 ```powershell
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scan_coordination.py tests/test_obs_client.py tests/test_scanner.py tests/test_scan_end_to_end.py tests/test_aggregation.py tests/test_parquet_aggregation.py -q
-# 170 passed in 3.51s
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_parquet_aggregation.py tests/test_aggregation.py tests/test_external_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+# 207 passed in 5.61s
+
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_api.py -k "config_apps or parquet" -q
+# 9 passed, 1 skipped, 18 deselected, 1 warning in 1.10s
 
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
 # exit 0
 
-git diff --check efc8bf9..HEAD
-# exit 0
-
 & '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
-# 268 passed, 5 failed, 1 skipped, 1 warning in 6.27s
+# 278 passed, 5 failed, 1 skipped, 1 warning in 7.18s
+
+git diff --check
+# exit 0
 ```
 
-The five failures are the unchanged Windows baseline: two symlink privilege
-failures, CSV response CRLF normalization, backslash path semantics, and CLI
-path-separator rendering. No task-caused focused failure remains.
+The five failures exactly match the baseline: two Windows symlink privilege
+failures, CSV response CRLF normalization, Windows backslash path semantics,
+and CLI path-separator rendering. No focused task failure remains. Repository
+policy therefore keeps `docs/current-task.md` at `wip`.
 
 ## Push status
 
-At this snapshot the branch is clean at `9a186f2` and seven commits ahead of
-`origin/codex/parquet-overview`. The final handoff-only commit and push execute
-immediately after this file is written. If this file is read from the remote
-branch, that delivery necessarily succeeded. The final response records the
-remote equality check and final pushed hash.
+Pending final handoff commit and `git push -u origin HEAD`.
 
 ## Uncommitted changes, if any
 
-This handoff file and `docs/current-task.md` are the only intended tracked
-pre-commit changes. After their documentation-only commit, the tracked working
-tree must be clean. The plan-specific SDD scratch directory is local, ignored,
-and absent from `git ls-files`.
+At this snapshot only `docs/current-task.md` and `docs/handoff.md` contain the
+final evidence update. They are committed before the first push. Push-result
+documentation is committed and pushed as a final follow-up action. Expected
+final working tree state: clean.
 
 ## Exact resume instructions for the next Codex session
 
 ```powershell
 cd D:\code\OBSScanPlatform
+git fetch origin
+git switch codex/parquet-overview
+git pull --ff-only
 git status --short --branch
 git log -10 --oneline
-git rev-parse HEAD
-git rev-parse origin/codex/parquet-overview
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_scan_coordination.py tests/test_obs_client.py tests/test_scanner.py tests/test_scan_end_to_end.py tests/test_aggregation.py tests/test_parquet_aggregation.py -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest -q
-& '.superpowers\sdd\.venv\Scripts\python.exe' -m compileall -q src tests
-git diff --check efc8bf9..HEAD
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_config.py tests/test_parquet_aggregation.py tests/test_aggregation.py tests/test_external_aggregation.py tests/test_scanner.py tests/test_scan_end_to_end.py -q
+& '.superpowers\sdd\.venv\Scripts\python.exe' -m pytest tests/test_api.py -k "config_apps or parquet" -q
 ```
 
-First compare local `HEAD` with `origin/codex/parquet-overview`. If equal,
-delivery is complete and no aggregation-barrier implementation work remains. If
-not equal, inspect `git status` and push the existing branch without creating
-another implementation wave. Treat the five Windows baseline failures as a
-separate task.
+Confirm local HEAD equals `origin/codex/parquet-overview` and the tree is
+clean. For operational validation, configure `aggregation_depth`, run a real
+Parquet scan, and check that cutoff rows preserve the deepest original file
+level. Handle the five Windows baseline failures only in a separate task.
