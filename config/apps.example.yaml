@@ -5,7 +5,7 @@ scan:
   temp_subdir: _tmp
   keep_temp_files: false
   overview_format: parquet
-  max_depth: 4
+  aggregation_depth: 4
   file_type_map:
     jpg: 图片
     jpeg: 图片

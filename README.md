@@ -80,7 +80,7 @@ Recommended request concurrency defaults:
 ```yaml
 scan:
   overview_format: parquet
-  max_depth: 4
+  aggregation_depth: 4
   bucket_concurrency: 4
   global_request_concurrency: 150
   metadata_concurrency_per_bucket: 8
@@ -121,7 +121,7 @@ All modeled fields may be omitted. Defaults are applied by the configuration mod
 | `temp_subdir` | `"_tmp"` | — |
 | `keep_temp_files` | `false` | — |
 | `overview_format` | `"parquet"` | Accepts `parquet` or `csv` |
-| `max_depth` | `4` | Global Parquet path cutoff; must be non-negative and `/` is depth 0 |
+| `aggregation_depth` | `4` | Global Parquet output-path cutoff; must be non-negative and `/` is depth 0. Legacy input `max_depth` is accepted only when this field is absent; configuring both names is invalid. |
 | `file_type_map` | Built-in extension mapping | YAML entries merge over normalized lowercase defaults |
 | `page_size` | `1000` | — |
 | `bucket_concurrency` | `4` | — |
@@ -235,7 +235,7 @@ results/<run_id>/<appid>/<bucket>/part-00002.parquet
 
 Each part contains at most 50,000 rows. Parquet rows have the exact non-nullable fields `bucket_id`, `bucket_name`, `appid`, `path`, `object_count`, `total_size`, `max_file_size`, `last_modified`, `max_depth`, and `file_types`. `last_modified` is the latest UTC `YYYY-MM-DD`; if all contributing timestamps are missing, it uses the UTC scan-start date. `file_types` is a sorted JSON array of categories from `scan.file_type_map`, with unknown or missing extensions classified as `其他`.
 
-Every object contributes to exactly one Parquet `path`. With `max_depth: 4`, `a/direct.txt` belongs only to `/a/`, while `a/b/c/d/e/deep.jpg` is truncated into `/a/b/c/d/`. Shallower paths contain direct files only; the cutoff path includes its deeper descendants. The row's `max_depth` value is the depth of its own `path`.
+Every object contributes to exactly one Parquet `path`. With `aggregation_depth: 4`, `a/direct.txt` belongs only to `/a/`, while `a/b/c/d/e/deep.jpg` is truncated into `/a/b/c/d/`. Shallower paths contain direct files only; the cutoff path includes its deeper descendants. The Parquet row's `max_depth` is the deepest original containing-directory level among its files, excluding the filename: `/a/b/file.txt` has depth 2 and `/a/b/c/d/e/file.txt` has depth 5. Therefore the truncated `/a/b/c/d/` row can have `max_depth: 5` or greater.
 
 Set `scan.overview_format: csv` to retain the existing single-file directory summary:
 

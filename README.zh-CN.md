@@ -79,7 +79,7 @@ applications:
 | `temp_subdir` | `"_tmp"` | 临时文件子目录 |
 | `keep_temp_files` | `false` | 扫描结束时清理桶临时目录 |
 | `overview_format` | `"parquet"` | 仅允许 `parquet` 或 `csv` |
-| `max_depth` | `4` | 全局 Parquet 路径截断深度，必须非负；根目录 `/` 为第 0 层 |
+| `aggregation_depth` | `4` | 全局 Parquet 输出路径截断深度，必须非负；根目录 `/` 为第 0 层。仅配置旧名称 `max_depth` 时仍兼容；两个名称同时出现时配置无效。 |
 | `file_type_map` | 内置扩展名映射 | YAML 条目按小写扩展名规范化后合并并覆盖默认值 |
 | `page_size` | `1000` | 请求分页大小 |
 | `bucket_concurrency` | `4` | 单次运行内所有应用共享的桶生命周期并发 |
@@ -218,7 +218,7 @@ results/<run_id>/<appid>/<bucket>/part-00002.parquet
 
 单个文件最多 50,000 行。Parquet 的 10 个 non-null 字段依次为 `bucket_id`、`bucket_name`、`appid`、`path`、`object_count`、`total_size`、`max_file_size`、`last_modified`、`max_depth`、`file_types`。`last_modified` 是最新的 UTC `YYYY-MM-DD`；全部修改时间缺失时使用扫描开始日。`file_types` 是按字符串升序去重后的 JSON 数组，未知或无扩展名归为 `其他`。
 
-每个对象只归入一个 Parquet `path`。`max_depth: 4` 时，`a/direct.txt` 只归入 `/a/`，`a/b/c/d/e/deep.jpg` 截断并归入 `/a/b/c/d/`。小于第 4 层的路径只统计直属文件，第 4 层同时统计更深后代；行内 `max_depth` 是当前 `path` 自身深度。
+每个对象只归入一个 Parquet `path`。`aggregation_depth: 4` 时，`a/direct.txt` 只归入 `/a/`，`a/b/c/d/e/deep.jpg` 截断并归入 `/a/b/c/d/`。小于第 4 层的路径只统计直属文件，第 4 层同时统计更深后代。Parquet 行内 `max_depth` 是该行所有文件原始所在目录的最大层级，不包含文件名：`/a/b/file.txt` 深度为 2，`/a/b/c/d/e/file.txt` 深度为 5，因此 `/a/b/c/d/` 行的 `max_depth` 可以是 5 或更大。
 
 设置 `scan.overview_format: csv` 可继续生成原有文件：
 

@@ -80,7 +80,7 @@ applications:
 ```yaml
 scan:
   overview_format: parquet
-  max_depth: 4
+  aggregation_depth: 4
   bucket_concurrency: 4
   global_request_concurrency: 150
   metadata_concurrency_per_bucket: 8
@@ -111,7 +111,7 @@ results/<run_id>/
 results/<run_id>/<appid>/<bucket>/part-00001.parquet
 ```
 
-Parquet 使用 Snappy 压缩，单个分片最多 50,000 行。`max_depth: 4` 时，根目录 `/` 是第 0 层；第 4 层以下的对象截断并累计到第 4 层，而较浅目录只统计直属文件。`file_type_map` 的完整默认映射见 `config/apps.example.yaml`，自定义扩展名会与默认值合并。
+Parquet 使用 Snappy 压缩，单个分片最多 50,000 行。`aggregation_depth: 4` 时，根目录 `/` 是第 0 层；第 4 层以下的对象截断并累计到第 4 层，而较浅目录只统计直属文件。旧配置名 `max_depth` 仅在未配置 `aggregation_depth` 时兼容，两个名称同时出现会导致配置校验失败。`file_type_map` 的完整默认映射见 `config/apps.example.yaml`，自定义扩展名会与默认值合并。
 
 如需原有 CSV，设置 `scan.overview_format: csv`，输出仍为 `results/<run_id>/<appid>/<bucket>.csv`，原字段和向祖先累计规则不变。
 
@@ -280,7 +280,7 @@ curl -o part-00001.parquet \
 - `results/<run_id>/<appid>/<bucket>/part-xxxxx.parquet`：默认的 Snappy Parquet 总览分片，每个最多 50,000 行。
 - `results/<run_id>/<appid>/<bucket>.csv`：仅在 `overview_format: csv` 时生成的旧目录级汇总。
 
-Parquet 字段依次为 `bucket_id`、`bucket_name`、`appid`、`path`、`object_count`、`total_size`、`max_file_size`、`last_modified`、`max_depth`、`file_types`，全部 non-null。`last_modified` 是最新 UTC 日期 `YYYY-MM-DD`，全部时间缺失时使用扫描开始日；`max_depth` 是当前 `path` 深度；`file_types` 是去重排序后的 JSON 数组，未知或无扩展名归为 `其他`。
+Parquet 字段依次为 `bucket_id`、`bucket_name`、`appid`、`path`、`object_count`、`total_size`、`max_file_size`、`last_modified`、`max_depth`、`file_types`，全部 non-null。`last_modified` 是最新 UTC 日期 `YYYY-MM-DD`，全部时间缺失时使用扫描开始日；`max_depth` 是该行所有文件原始所在目录的最大层级且不包含文件名，例如 `/a/b/file.txt` 为 2、`/a/b/c/d/e/file.txt` 为 5；`file_types` 是去重排序后的 JSON 数组，未知或无扩展名归为 `其他`。
 
 最终总览不保存完整文件清单。对象级临时 CSV 在扫描过程中写入 `results/<run_id>/_tmp/`。`scan.keep_temp_files` 默认为 `false`：每个桶一得到最终结果就会立即删除对应临时目录，然后才释放共享桶并发许可，无论桶最终为 `success`、`partial_failed` 还是 `failed`；设为 `true` 时则保留所有状态的临时目录。
 
