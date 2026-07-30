@@ -60,11 +60,12 @@ failures.
   unchanged.
 - Completed a local whole-task review from `576e9df` through `334ae93`; no
   Critical or Important finding remains.
+- Pushed the complete guide task and mandatory handoff through `464c5b8` to
+  `origin/codex/parquet-overview`; the final push-result record is committed
+  and pushed as the last delivery action.
 
 ## Remaining work
 
-- Commit and push the mandatory handoff records, then record and push the
-  resulting remote state.
 - No requested guide content or review work remains.
 - Run a representative live OBS scan when an environment is available.
 - Address the five unrelated Windows portability failures in a separate task.

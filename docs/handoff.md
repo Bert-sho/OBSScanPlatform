@@ -2,7 +2,7 @@
 
 ## Timestamp
 
-`2026-07-30 16:32:39 +08:00` (Asia/Shanghai)
+`2026-07-30 16:35:04 +08:00` (Asia/Shanghai)
 
 ## Machine/environment
 
@@ -27,8 +27,9 @@
 - `6631bc3` — `docs: add comprehensive project guide`
 - `7ec1705` — `docs: clarify project guide concurrency limits`
 - `334ae93` — `docs: document project security boundaries`
-- The final handoff commit is created after this snapshot; resolve its exact
-  hash with `git log -1 --oneline` after fetching.
+- `464c5b8` — `docs: finalize comprehensive project guide handoff`
+- The final push-result commit is the commit containing the latest version of
+  this file; resolve its exact hash with `git log -1 --oneline` after fetching.
 
 ## Summary of what changed
 
@@ -142,15 +143,23 @@ file_types=26 csv_fields=17 parquet_fields=10 routes=8
 
 ## Push status
 
-Not yet pushed at this snapshot. The next actions are the mandatory handoff
-commit, `git push -u origin HEAD`, a push-result record, a final push, and an
-explicit local/remote HEAD equality check.
+`git push -u origin HEAD` succeeded for `codex/parquet-overview` through
+`464c5b8`:
+
+```text
+576e9df..464c5b8  HEAD -> codex/parquet-overview
+```
+
+The final documentation commit containing this push record is pushed
+immediately after creation, followed by an explicit local/remote HEAD equality
+check.
 
 ## Uncommitted changes, if any
 
-At this snapshot `docs/current-task.md` and `docs/handoff.md` contain the new
-task records and are uncommitted. Expected final state after the steps below:
-clean working tree, local HEAD equal to `origin/codex/parquet-overview`.
+At this push-result snapshot only `docs/current-task.md` and `docs/handoff.md`
+are uncommitted. They are committed and pushed as the final follow-up action.
+Expected final state: clean working tree, local HEAD equal to
+`origin/codex/parquet-overview`.
 
 ## Exact resume instructions for the next Codex session
 
