@@ -449,7 +449,7 @@ class Scanner:
                         temp_dir=temp_dir,
                         output_dir=parquet_output_dir,
                         scan_started_ms=scan_started_ms,
-                        max_depth=self.config.scan.max_depth,
+                        aggregation_depth=self.config.scan.aggregation_depth,
                         file_type_map=self.config.scan.file_type_map,
                         max_directories_in_memory=self.config.scan.aggregation_max_directories_in_memory,
                         keep_temp_files=self.config.scan.keep_temp_files,

@@ -2782,11 +2782,14 @@ async def test_scan_bucket_aggregates_parquet_inside_global_writer_scope(
 ):
     scanner, application, bucket = make_scanner()
     events: list[str] = []
+    captured: dict[str, object] = {}
     phase_coordinator = RecordingAggregationCoordinator(events)
     scanner.config.scan.overview_format = "parquet"
+    scanner.config.scan.aggregation_depth = 3
     part_path = tmp_path / application.appid / bucket.name / "part-00001.parquet"
 
     def capture_parquet_aggregation(**kwargs):
+        captured.update(kwargs)
         events.append("parquet-aggregate")
         return (part_path,)
 
@@ -2815,6 +2818,8 @@ async def test_scan_bucket_aggregates_parquet_inside_global_writer_scope(
         "parquet-aggregate",
         "aggregation-scope-exit",
     ]
+    assert captured["aggregation_depth"] == 3
+    assert "max_depth" not in captured
     assert result.overview_files == (part_path,)
 
 
@@ -2822,7 +2827,7 @@ async def test_scan_bucket_aggregates_parquet_inside_global_writer_scope(
 async def test_scan_bucket_writes_default_parquet_overview_and_manifest_paths(tmp_path: Path):
     scanner, application, bucket = make_scanner()
     scanner.config.scan.overview_format = "parquet"
-    scanner.config.scan.max_depth = 4
+    scanner.config.scan.aggregation_depth = 4
     client = FakeClient(
         [
             {"result": "http://bucket-endpoint/"},
